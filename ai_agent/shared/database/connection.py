@@ -1,0 +1,306 @@
+import json
+import logging
+import importlib
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Optional
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
+
+logger = logging.getLogger(__name__)
+
+
+class Base(DeclarativeBase):
+    """SQLAlchemy声明式基类"""
+    
+    def to_dict(self):
+        """将SQLAlchemy模型转换为字典"""
+        return {column.name: getattr(self, column.name) for column in self.__table__.columns}
+
+
+class DatabaseManager:
+    """数据库管理器"""
+    
+    def __init__(self, database_url: str):
+        self.database_url = database_url
+        self.engine = None
+        self.async_session = None
+        
+    async def initialize(self):
+        """初始化数据库连接"""
+        try:
+            # PostgreSQL连接配置
+            connect_args = {}
+            if 'postgresql' in self.database_url:
+                # 使用环境变量配置时区
+                connect_args = {
+                    'server_settings': {
+                        'timezone': 'Asia/Shanghai'
+                    }
+                }
+            
+            self.engine = create_async_engine(
+                self.database_url,
+                echo=False,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+                json_serializer=lambda x: json.dumps(x, ensure_ascii=False),
+                json_deserializer=json.loads,
+                **({'connect_args': connect_args} if connect_args else {})
+            )
+            
+            self.async_session = async_sessionmaker(
+                self.engine,
+                class_=AsyncSession,
+                expire_on_commit=False
+            )
+            
+            logger.info("数据库连接初始化成功")
+            
+        except Exception as e:
+            logger.error(f"数据库连接初始化失败: {e}")
+            raise
+    
+    async def close(self):
+        """关闭数据库连接"""
+        if self.engine:
+            await self.engine.dispose()
+        logger.info("数据库连接已关闭")
+    
+    async def create_tables(self):
+        """创建数据库表"""
+        importlib.import_module("shared.database.models")
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await _run_schema_compatibility_migrations(conn)
+            logger.info("数据库表创建完成")
+    
+    @asynccontextmanager
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+        """获取数据库会话"""
+        async with self.async_session() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"数据库会话错误: {e}")
+                raise
+            finally:
+                await session.close()
+    
+# 全局数据库管理器实例
+_db_manager: Optional[DatabaseManager] = None
+
+
+def init_db_manager(database_url: str) -> DatabaseManager:
+    """初始化全局数据库管理器"""
+    global _db_manager
+    _db_manager = DatabaseManager(database_url)
+    return _db_manager
+
+
+def get_db_manager() -> DatabaseManager:
+    """获取全局数据库管理器"""
+    if _db_manager is None:
+        raise RuntimeError("数据库管理器未初始化，请先调用init_db_manager")
+    return _db_manager
+
+
+@asynccontextmanager
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """获取数据库会话的上下文管理器"""
+    if _db_manager is None:
+        raise RuntimeError("数据库管理器未初始化")
+    async with _db_manager.get_session() as session:
+        yield session
+
+
+async def _run_schema_compatibility_migrations(conn) -> None:
+    """Apply idempotent schema fixes that create_all cannot apply to existing tables."""
+    dialect_name = conn.dialect.name
+    if dialect_name == "postgresql":
+        await conn.execute(
+            text(
+                "ALTER TABLE agent_rollbacks "
+                "ADD COLUMN IF NOT EXISTS nono_state_home TEXT NOT NULL DEFAULT ''"
+            )
+        )
+        await conn.execute(
+            text(
+                "UPDATE agent_rollbacks AS rollback "
+                "SET nono_state_home = COALESCE(session.raw_event->'nono'->>'state_home', '') "
+                "FROM agent_sessions AS session "
+                "WHERE rollback.run_id = session.run_id "
+                "AND rollback.nono_state_home = '' "
+                "AND session.raw_event->'nono'->>'state_home' IS NOT NULL"
+            )
+        )
+        await conn.execute(
+            text("UPDATE agent_rollbacks SET status = 'requested' WHERE status = 'publishing'")
+        )
+        await _isolate_duplicate_agent_rollbacks_postgres(conn)
+    elif dialect_name == "sqlite":
+        columns = await conn.execute(text("PRAGMA table_info(agent_rollbacks)"))
+        if "nono_state_home" not in {row[1] for row in columns}:
+            await conn.execute(
+                text("ALTER TABLE agent_rollbacks ADD COLUMN nono_state_home TEXT NOT NULL DEFAULT ''")
+            )
+        await conn.execute(text("UPDATE agent_rollbacks SET status = 'requested' WHERE status = 'publishing'"))
+        await _isolate_duplicate_agent_rollbacks_sqlite(conn)
+
+
+async def _isolate_duplicate_agent_rollbacks_postgres(conn) -> None:
+    await conn.execute(
+        text(
+            "UPDATE agent_rollbacks AS rollback "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(rollback.completed_at, NOW()) "
+            "WHERE rollback.status IN ('requested', 'queued', 'executing') "
+            "AND EXISTS ("
+            "  SELECT 1 FROM agent_rollbacks AS terminal "
+            "  WHERE terminal.run_id = rollback.run_id "
+            "  AND terminal.nono_session_id = rollback.nono_session_id "
+            "  AND terminal.snapshot = rollback.snapshot "
+            "  AND terminal.nono_state_home = rollback.nono_state_home "
+            "  AND terminal.status IN ('completed', 'failed') "
+            "  AND COALESCE(terminal.error_message, '') != :reason"
+            ")"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )
+    await conn.execute(
+        text(
+            "WITH ranked AS ("
+            "  SELECT id, ROW_NUMBER() OVER ("
+            "    PARTITION BY run_id, nono_session_id, snapshot, nono_state_home "
+            "    ORDER BY requested_at ASC, id ASC"
+            "  ) AS duplicate_rank "
+            "  FROM agent_rollbacks "
+            "  WHERE status = 'executing'"
+            ") "
+            "UPDATE agent_rollbacks AS rollback "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(rollback.completed_at, NOW()) "
+            "FROM ranked "
+            "WHERE rollback.id = ranked.id "
+            "AND ranked.duplicate_rank > 1"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )
+    await conn.execute(
+        text(
+            "UPDATE agent_rollbacks AS rollback "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(rollback.completed_at, NOW()) "
+            "WHERE rollback.status IN ('requested', 'queued') "
+            "AND EXISTS ("
+            "  SELECT 1 FROM agent_rollbacks AS executing "
+            "  WHERE executing.run_id = rollback.run_id "
+            "  AND executing.nono_session_id = rollback.nono_session_id "
+            "  AND executing.snapshot = rollback.snapshot "
+            "  AND executing.nono_state_home = rollback.nono_state_home "
+            "  AND executing.status = 'executing'"
+            ")"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )
+    await conn.execute(
+        text(
+            "WITH ranked AS ("
+            "  SELECT id, ROW_NUMBER() OVER ("
+            "    PARTITION BY run_id, nono_session_id, snapshot, nono_state_home "
+            "    ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END, requested_at ASC, id ASC"
+            "  ) AS duplicate_rank "
+            "  FROM agent_rollbacks "
+            "  WHERE status IN ('requested', 'queued')"
+            ") "
+            "UPDATE agent_rollbacks AS rollback "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(rollback.completed_at, NOW()) "
+            "FROM ranked "
+            "WHERE rollback.id = ranked.id "
+            "AND ranked.duplicate_rank > 1"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )
+
+async def _isolate_duplicate_agent_rollbacks_sqlite(conn) -> None:
+    await conn.execute(
+        text(
+            "UPDATE agent_rollbacks "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP) "
+            "WHERE status IN ('requested', 'queued', 'executing') "
+            "AND EXISTS ("
+            "  SELECT 1 FROM agent_rollbacks AS terminal "
+            "  WHERE terminal.run_id = agent_rollbacks.run_id "
+            "  AND terminal.nono_session_id = agent_rollbacks.nono_session_id "
+            "  AND terminal.snapshot = agent_rollbacks.snapshot "
+            "  AND terminal.nono_state_home = agent_rollbacks.nono_state_home "
+            "  AND terminal.status IN ('completed', 'failed') "
+            "  AND COALESCE(terminal.error_message, '') != :reason"
+            ")"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )
+    await conn.execute(
+        text(
+            "WITH ranked AS ("
+            "  SELECT id, ROW_NUMBER() OVER ("
+            "    PARTITION BY run_id, nono_session_id, snapshot, nono_state_home "
+            "    ORDER BY requested_at ASC, id ASC"
+            "  ) AS duplicate_rank "
+            "  FROM agent_rollbacks "
+            "  WHERE status = 'executing'"
+            ") "
+            "UPDATE agent_rollbacks "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP) "
+            "WHERE id IN (SELECT id FROM ranked WHERE duplicate_rank > 1)"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )
+    await conn.execute(
+        text(
+            "UPDATE agent_rollbacks "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP) "
+            "WHERE status IN ('requested', 'queued') "
+            "AND EXISTS ("
+            "  SELECT 1 FROM agent_rollbacks AS executing "
+            "  WHERE executing.run_id = agent_rollbacks.run_id "
+            "  AND executing.nono_session_id = agent_rollbacks.nono_session_id "
+            "  AND executing.snapshot = agent_rollbacks.snapshot "
+            "  AND executing.nono_state_home = agent_rollbacks.nono_state_home "
+            "  AND executing.status = 'executing'"
+            ")"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )
+    await conn.execute(
+        text(
+            "WITH ranked AS ("
+            "  SELECT id, ROW_NUMBER() OVER ("
+            "    PARTITION BY run_id, nono_session_id, snapshot, nono_state_home "
+            "    ORDER BY CASE status WHEN 'queued' THEN 0 ELSE 1 END, requested_at ASC, id ASC"
+            "  ) AS duplicate_rank "
+            "  FROM agent_rollbacks "
+            "  WHERE status IN ('requested', 'queued')"
+            ") "
+            "UPDATE agent_rollbacks "
+            "SET status = 'failed', "
+            "    error_message = :reason, "
+            "    completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP) "
+            "WHERE id IN (SELECT id FROM ranked WHERE duplicate_rank > 1)"
+        ),
+        {"reason": "duplicate active rollback isolated during schema migration"},
+    )

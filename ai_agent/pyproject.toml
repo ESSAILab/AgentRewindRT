@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepxdr"
+version = "1.0.0"
+description = "AgentGuard 智能体代码变更安全分析系统"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "PMLabs Technology Co., Ltd."}
+]
+requires-python = ">=3.11"
+
+dependencies = [
+    "pydantic==2.12.5",
+    "sqlalchemy==2.0.32",
+    "asyncpg==0.29.0",
+    "aiokafka==0.11.0",
+    "fastapi==0.115.0",
+    "uvicorn==0.40.0",
+    "langgraph==0.5.4",
+    "openai==1.99.2",
+    "pytz==2023.3",
+    "python-dotenv==1.0.1",
+    "boto3>=1.35.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.2",
+    "pytest-asyncio==0.24.0",
+    "black==24.8.0",
+    "isort==5.13.2",
+    "mypy==1.11.2",
+]
+
+[project.scripts]
+deepxdr-nono-shim = "agent_guard.nono_shim:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "api_server*",
+    "agent_guard*",
+    "shared*",
+]

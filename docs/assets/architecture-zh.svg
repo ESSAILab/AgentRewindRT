@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="710" viewBox="0 0 1200 710" role="img" aria-labelledby="title desc">
+  <title id="title">AgentRewindRT 系统架构</title>
+  <desc id="desc">宿主机上的 nono 包装入口执行智能体任务，保存工作区快照，向 MinIO 上传 diff 并向 Kafka 发布事件。后端读取证据、分析变更并保存到 PostgreSQL。用户通过 Web UI 审阅，回退请求经 Kafka 交给后端调用 nono 恢复共享工作区。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#64748b"/></marker>
+    <marker id="green" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#16816a"/></marker>
+    <style>
+      text{font-family:"Noto Sans CJK SC","Microsoft YaHei","PingFang SC",sans-serif}
+      .title{font-size:28px;font-weight:700;fill:#172554}
+      .section{font-size:17px;font-weight:700;fill:#334155}
+      .name{font-size:19px;font-weight:700;fill:#172554}
+      .body{font-size:15px;fill:#475569}
+      .label{font-size:14px;fill:#475569}
+      .line{fill:none;stroke:#64748b;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1200" height="710" rx="20" fill="#f8fafc"/>
+  <text x="38" y="49" class="title">AgentRewindRT</text>
+  <text x="38" y="78" class="body">任务执行 · 变更分析 · 人工审阅 · 快照回退</text>
+  <rect x="28" y="105" width="338" height="482" rx="16" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="50" y="137" class="section">宿主机 / 执行环境</text>
+  <rect x="51" y="165" width="292" height="86" rx="10" fill="white" stroke="#cbd5e1"/>
+  <text x="71" y="196" class="name">scripts/nono</text>
+  <text x="71" y="224" class="body">记录原始任务与 run_id</text>
+  <path d="M197 251V282" class="line"/>
+  <rect x="51" y="284" width="292" height="88" rx="10" fill="white" stroke="#cbd5e1"/>
+  <text x="71" y="316" class="name">nono + 智能体 CLI</text>
+  <text x="71" y="345" class="body">隔离执行 · 工作区快照</text>
+  <path d="M197 372V434" class="line"/>
+  <text x="212" y="407" class="label">文件修改与快照</text>
+  <rect x="51" y="436" width="292" height="112" rx="10" fill="white" stroke="#93c5fd"/>
+  <text x="71" y="470" class="name">工作区 / nono 状态目录</text>
+  <text x="71" y="500" class="body">宿主机与后端容器</text>
+  <text x="71" y="524" class="body">使用相同绝对路径</text>
+  <rect x="400" y="105" width="772" height="482" rx="16" fill="#fff" stroke="#cbd5e1"/>
+  <text x="424" y="137" class="section">Docker Compose / 分析与审阅服务</text>
+  <rect x="424" y="165" width="302" height="86" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="444" y="196" class="name">Kafka</text>
+  <text x="444" y="224" class="body">会话完成 / 回退请求 / 回退结果</text>
+  <path d="M343 190H422" class="line"/>
+  <text x="370" y="180" class="label">事件</text>
+  <rect x="424" y="284" width="302" height="88" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="444" y="316" class="name">MinIO</text>
+  <text x="444" y="345" class="body">diff 证据与 SHA-256 引用</text>
+  <path d="M343 230H383V328H422" class="line"/>
+  <text x="387" y="275" class="label">diff</text>
+  <rect x="814" y="165" width="328" height="207" rx="10" fill="#eef2ff" stroke="#a5b4fc"/>
+  <text x="836" y="198" class="name">ai-agent 后端</text>
+  <text x="836" y="230" class="body">证据校验 → 规则检测</text>
+  <text x="836" y="258" class="body">上下文规划 → LLM 分析</text>
+  <text x="836" y="296" class="body">FastAPI 会话与处置接口</text>
+  <text x="836" y="339" class="body">回退执行器 → nono</text>
+  <path d="M726 208H812" class="line"/>
+  <path d="M726 328H812" class="line"/>
+  <text x="741" y="198" class="label">消费</text>
+  <text x="741" y="318" class="label">读取</text>
+  <rect x="424" y="436" width="302" height="112" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="444" y="470" class="name">PostgreSQL</text>
+  <text x="444" y="500" class="body">会话 · 文件分析</text>
+  <text x="444" y="524" class="body">人工决定 · 回退记录</text>
+  <path d="M888 372V399H575V434" class="line"/>
+  <text x="621" y="392" class="label">持久化</text>
+  <rect x="814" y="436" width="328" height="112" rx="10" fill="#f0fdf4" stroke="#86efac"/>
+  <text x="836" y="470" class="name">Web UI / 人工审阅</text>
+  <text x="836" y="500" class="body">任务、diff、风险与意图一致性</text>
+  <text x="836" y="524" class="body">接受变更 / 请求回退</text>
+  <path d="M1060 436V374" class="line"/>
+  <text x="1071" y="409" class="label">API</text>
+  <path d="M1142 336H1155V612H197V550" fill="none" stroke="#16816a" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#green)"/>
+  <text x="416" y="641" font-size="15" fill="#126853">人工请求回退后：校验快照 → 恢复预演 → 恢复工作区文件</text>
+  <text x="38" y="673" class="body">分析在任务成功退出后异步执行；模型提供处置建议，文件恢复由人工发起。</text>
+</svg>

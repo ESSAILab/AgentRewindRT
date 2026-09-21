@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentRewindRT</title>
+    <script defer src="/static/js/alpine.min.js"></script>
+    <link rel="stylesheet" href="/static/css/full-tailwind.css">
+    <link rel="stylesheet" href="/static/css/fontawesome.min.css">
+    <style>
+        [x-cloak] { display: none !important; }
+        .agent-session-row {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: minmax(0, 1fr) auto;
+        }
+        @media (max-width: 1279px) {
+            .agent-session-row { grid-template-columns: minmax(0, 1fr); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+<main x-data="agentGuardDashboard()" x-init="init()" x-cloak class="w-full max-w-full px-4 sm:px-6 lg:px-8 py-6">
+    <header class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+            <img src="/static/images/logo.jpg" alt="紫金山实验室" class="h-10 w-auto object-contain">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900">AgentRewindRT</h1>
+            </div>
+        </div>
+        <button @click="loadAgentSessions()" :aria-disabled="agentSessionsLoading"
+                class="px-3 py-2 rounded-lg border bg-white text-sm">
+            <i class="fas fa-sync-alt mr-1.5" :class="agentSessionsLoading ? 'fa-spin' : ''"></i>刷新
+        </button>
+    </header>
+
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <article class="bg-white rounded-xl border p-4 flex items-center justify-between">
+            <div><p class="text-sm text-gray-500">总告警数</p><p class="text-2xl font-bold" x-text="agentSessionPagination.total || 0"></p></div>
+            <div class="p-2.5 bg-gray-100 rounded-full"><i class="fas fa-list-check text-gray-700 text-xl"></i></div>
+        </article>
+        <article class="bg-white rounded-xl border p-4 flex items-center justify-between">
+            <div><p class="text-sm text-gray-500">待人工处理</p><p class="text-2xl font-bold text-red-600" x-text="getAgentActionableCount()"></p></div>
+            <div class="p-2.5 bg-red-100 rounded-full"><i class="fas fa-user-check text-red-600 text-xl"></i></div>
+        </article>
+        <article class="bg-white rounded-xl border p-4 flex items-center justify-between">
+            <div><p class="text-sm text-gray-500">已完成回退</p><p class="text-2xl font-bold text-green-700" x-text="getAgentCompletedCount()"></p></div>
+            <div class="p-2.5 bg-green-100 rounded-full"><i class="fas fa-undo text-green-700 text-xl"></i></div>
+        </article>
+    </section>
+
+    <section class="bg-white rounded-xl border overflow-hidden">
+        <div class="px-5 py-4 border-b"><h2 class="font-semibold">智能体告警</h2></div>
+        <div x-show="agentSessionsLoading && agentSessions.length === 0" class="p-8 text-center text-gray-500">加载中...</div>
+        <div x-show="agentSessionError" class="p-4 bg-red-50 text-red-700" x-text="agentSessionError"></div>
+        <div x-show="!agentSessionsLoading && agentSessions.length === 0" class="p-8 text-center text-gray-500">暂无智能体告警</div>
+
+        <template x-for="session in agentSessions" :key="session.run_id">
+            <article class="p-5 border-b last:border-b-0">
+                <div class="agent-session-row">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="font-mono text-sm" x-text="session.run_id"></span>
+                            <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="getAgentRiskClass(getAgentAdjudication(session).risk_level)" x-text="getAgentRiskLabel(getAgentAdjudication(session).risk_level)"></span>
+                            <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="getAgentDispositionClass(session)" x-text="getAgentDispositionStatus(session)"></span>
+                        </div>
+                        <p class="text-sm text-gray-700 mb-3" x-text="session.original_request || '未记录原始请求'"></p>
+                        <dl class="grid md:grid-cols-3 gap-3 text-sm">
+                            <div><dt class="text-gray-500">变更风险分析</dt><dd x-text="getAgentAdjudication(session).summary || '分析处理中'"></dd></div>
+                            <div><dt class="text-gray-500">本次变更</dt><dd x-text="`${getAgentChangedFiles(session).length} 个文件`"></dd></div>
+                            <div><dt class="text-gray-500">更新时间</dt><dd x-text="formatDate(session.updated_at || session.created_at)"></dd></div>
+                        </dl>
+                        <details class="mt-3">
+                            <summary class="cursor-pointer text-sm text-teal-700">运行证据与文件预览</summary>
+                            <template x-for="file in getAgentChangedFiles(session)" :key="file.path">
+                                <div class="mt-2 rounded border p-3 text-xs">
+                                    <div class="font-mono" x-text="file.path"></div>
+                                    <div x-show="file.diff_truncated" class="text-amber-700">diff 预览已截断</div>
+                                    <pre class="mt-2 overflow-auto whitespace-pre-wrap" x-text="file.diff || file.summary || ''"></pre>
+                                </div>
+                            </template>
+                        </details>
+                        <div x-show="getAgentRollbackError(session)" class="mt-3 text-sm text-red-700">
+                            <strong>回退失败原因：</strong><span x-text="getAgentRollbackError(session)"></span>
+                        </div>
+                    </div>
+                    <div x-show="canActOnAgentSession(session)" class="flex items-center justify-end gap-1.5 flex-nowrap">
+                        <button data-agent-action="accept" :data-run-id="session.run_id" @click="acceptAgentSession(session)"
+                                :aria-disabled="!canActOnAgentSession(session) || agentSessionActionInFlight[session.run_id]"
+                                onclick="return window.handleAgentSessionAction(event, this)"
+                                class="flex-none px-2.5 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 text-xs whitespace-nowrap">
+                            <i class="fas fa-check mr-1"></i>接受变更
+                        </button>
+                        <button data-agent-action="rollback" :data-run-id="session.run_id" @click="rollbackAgentSession(session)"
+                                :aria-disabled="!canActOnAgentSession(session) || agentSessionActionInFlight[session.run_id]"
+                                onclick="return window.handleAgentSessionAction(event, this)"
+                                class="flex-none px-2 py-1 rounded bg-red-600 text-white text-xs"
+                                x-text="agentSessionActionInFlight[session.run_id] ? '回退请求中...' : '执行回退'"></button>
+                        <button data-agent-action="delete" :data-run-id="session.run_id" @click="deleteAgentSession(session)"
+                                :aria-disabled="agentSessionActionInFlight[session.run_id]" aria-label="删除告警" title="删除告警"
+                                onclick="return window.handleAgentSessionAction(event, this)"
+                                class="flex-none w-6 h-6 text-gray-500"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+            </article>
+        </template>
+
+        <nav x-show="agentSessionPagination.pages > 1" class="flex justify-between items-center p-4">
+            <button @click="changeAgentSessionPage(agentSessionPagination.page - 1)" :disabled="agentSessionPagination.page <= 1">上一页</button>
+            <span x-text="`${agentSessionPagination.page} / ${agentSessionPagination.pages}`"></span>
+            <button @click="changeAgentSessionPage(agentSessionPagination.page + 1)" :disabled="agentSessionPagination.page >= agentSessionPagination.pages">下一页</button>
+        </nav>
+    </section>
+</main>
+
+<script>
+function agentGuardDashboard() {
+    return {
+        searchType: 'agent',
+        agentSessions: [],
+        agentSessionsLoading: false,
+        agentSessionError: '',
+        agentSessionTimer: null,
+        agentSessionRequestSequence: 0,
+        agentSessionActionInFlight: {},
+        agentSessionPagination: {page: 1, size: 20, total: 0, pages: 0},
+
+        init() {
+            this.loadAgentSessions().then(() => this.startAgentSessionPolling());
+        },
+
+        startAgentSessionPolling() {
+            this.stopAgentSessionPolling();
+            this.agentSessionTimer = setInterval(() => {
+                if (this.agentSessionsLoading) return;
+                this.loadAgentSessions();
+            }, 8000);
+        },
+
+        stopAgentSessionPolling() {
+            if (this.agentSessionTimer) clearInterval(this.agentSessionTimer);
+            this.agentSessionTimer = null;
+        },
+
+        async loadAgentSessions(page = this.agentSessionPagination.page) {
+            const requestSequence = ++this.agentSessionRequestSequence;
+            try {
+                this.agentSessionsLoading = true;
+                this.agentSessionError = '';
+                const params = new URLSearchParams();
+                params.append('page', page);
+                params.append('size', this.agentSessionPagination.size);
+                const response = await fetch(`/api/agent-sessions?${params.toString()}`);
+                if (!response.ok) throw new Error(`加载失败: ${response.status}`);
+                const result = await response.json();
+                if (requestSequence !== this.agentSessionRequestSequence) return;
+                this.agentSessions = result.items || [];
+                this.agentSessionPagination = {
+                    page: result.page || page,
+                    size: result.size || this.agentSessionPagination.size,
+                    total: result.total || 0,
+                    pages: result.pages || 0,
+                };
+            } catch (error) {
+                if (requestSequence !== this.agentSessionRequestSequence) return;
+                this.agentSessionError = error.message || String(error);
+                console.error(error);
+            } finally {
+                if (requestSequence === this.agentSessionRequestSequence) {
+                    this.agentSessionsLoading = false;
+                }
+            }
+        },
+
+        async changeAgentSessionPage(page) {
+            if (page < 1 || page > this.agentSessionPagination.pages) return;
+            await this.loadAgentSessions(page);
+        },
+
+        canActOnAgentSession(session) {
+            return !session.decision && ['not_requested', null, undefined].includes(session.rollback_status);
+        },
+
+        async runAgentAction(session, action, options = {}) {
+            if (this.agentSessionActionInFlight[session.run_id]) return;
+            this.agentSessionActionInFlight[session.run_id] = true;
+            try {
+                const response = await fetch(`/api/agent-sessions/${encodeURIComponent(session.run_id)}/${action}`, options);
+                if (!response.ok) throw new Error(`操作失败: ${response.status}`);
+                await this.loadAgentSessions();
+            } catch (error) {
+                this.agentSessionError = error.message || String(error);
+            } finally {
+                delete this.agentSessionActionInFlight[session.run_id];
+            }
+        },
+
+        async acceptAgentSession(session) {
+            await this.runAgentAction(session, 'accept', {method: 'POST'});
+        },
+
+        async rollbackAgentSession(session) {
+            if (!confirm('确认执行回退？该操作会恢复 nono 快照。')) return;
+            await this.runAgentAction(session, 'rollback', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({requested_by: 'web_ui'})
+            });
+        },
+
+        async deleteAgentSession(session) {
+            if (!confirm('确认删除该智能体告警？\n此操作只删除平台告警记录，不会回滚代码变更。')) return;
+            if (this.agentSessionActionInFlight[session.run_id]) return;
+            this.agentSessionActionInFlight[session.run_id] = true;
+            try {
+                const response = await fetch(`/api/agent-sessions/${encodeURIComponent(session.run_id)}`, {method: 'DELETE'});
+                if (!response.ok) throw new Error(`删除失败: ${response.status}`);
+                this.agentSessions = this.agentSessions.filter(item => item.run_id !== session.run_id);
+                await this.loadAgentSessions();
+            } finally {
+                delete this.agentSessionActionInFlight[session.run_id];
+            }
+        },
+
+        getAgentAdjudication(session) { return session.adjudication || {}; },
+        getAgentChangedFiles(session) { return session.changed_files_preview || session.changed_files || []; },
+        getAgentActionableCount() { return this.agentSessions.filter(session => this.canActOnAgentSession(session)).length; },
+        getAgentCompletedCount() { return this.agentSessions.filter(session => session.rollback_status === 'completed').length; },
+        getAgentRollbackError(session) { return session.rollback_error || session.error_message || ''; },
+        getAgentDispositionStatus(session) {
+            if (session.rollback_status === 'completed') return '已回退';
+            if (session.rollback_status === 'failed') return '回退失败';
+            if (session.rollback_status && session.rollback_status !== 'not_requested') return '回退处理中';
+            if (session.decision === 'accepted') return '已接受';
+            return '待人工确认';
+        },
+        getAgentDispositionClass(session) {
+            if (session.rollback_status === 'failed') return 'bg-red-100 text-red-800';
+            if (session.rollback_status === 'completed') return 'bg-gray-100 text-gray-700';
+            return 'bg-yellow-100 text-yellow-800';
+        },
+        getAgentRiskLabel(level) { return ({critical: '严重', high: '高', medium: '中', low: '低'})[level] || '未知'; },
+        getAgentRiskClass(level) { return ({critical: 'bg-red-100 text-red-800', high: 'bg-red-50 text-red-700', medium: 'bg-yellow-100 text-yellow-800', low: 'bg-green-100 text-green-800'})[level] || 'bg-gray-100 text-gray-700'; },
+        formatDate(value) { return value ? new Date(value).toLocaleString('zh-CN') : '-'; },
+    };
+}
+
+window.handleAgentSessionAction = async function(event, button) {
+    if (event && event.__agentGuardFallbackHandled) return false;
+    if (event) event.__agentGuardFallbackHandled = true;
+    if (button.closest('[x-data]')?._x_dataStack) return true;
+    event?.preventDefault();
+    const action = button.dataset.agentAction;
+    const runId = button.dataset.runId;
+    if (!action || !runId) return false;
+    const method = action === 'delete' ? 'DELETE' : 'POST';
+    const url = action === 'delete' ? `/api/agent-sessions/${encodeURIComponent(runId)}` : `/api/agent-sessions/${encodeURIComponent(runId)}/${action}`;
+    await fetch(url, {method, headers: {'Content-Type': 'application/json'}, body: action === 'rollback' ? JSON.stringify({requested_by: 'web_ui'}) : undefined});
+    return false;
+};
+</script>
+</body>
+</html>

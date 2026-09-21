@@ -1,5 +1,5 @@
 <div align="center">
-<img src="docs/assets/agentrewindrt-header.gif" alt="AgentRewindRT 项目名快速跳变动图" width="550" />
+<img src="docs/assets/agentrewindrt-header.gif" alt="AgentRewindRT 项目名快速跳变动图" width="490" />
 
 **面向AI Agent提供安全沙箱，实时检测原始请求与工作空间变更的一致性，自动识别风险并支持异常会话的一键回滚**
 

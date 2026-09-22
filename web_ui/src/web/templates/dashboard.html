@@ -9,13 +9,35 @@
     <link rel="stylesheet" href="/static/css/fontawesome.min.css">
     <style>
         [x-cloak] { display: none !important; }
-        .agent-session-row {
-            display: grid;
-            gap: 1rem;
-            grid-template-columns: minmax(0, 1fr) auto;
-        }
+        .agent-tab-active { background: linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%); color: #fff; }
+        .agent-session-row { display: grid; gap: .75rem; grid-template-columns: minmax(0, 1fr) auto; }
+        .agent-session-toggle { width: 100%; border-radius: .25rem; grid-column: 1 / -1; }
+        .agent-session-actions { grid-column: 1 / -1; }
+        /* These reference colors are absent from the bundled Tailwind stylesheet. */
+        .bg-orange-100 { background-color: #ffedd5; }
+        .text-orange-800 { color: #9a3412; }
+        .bg-amber-50 { background-color: #fffbeb; }
+        .text-amber-700 { color: #b45309; }
+        .border-amber-200 { border-color: #fde68a; }
+        .agent-session-toggle:focus-visible { outline: 2px solid #0ea5e9; outline-offset: 4px; }
+        .agent-session-heading, .agent-file-heading, .agent-analysis-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: .5rem; }
+        .agent-session-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .375rem; }
+        .agent-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+        .agent-analysis-heading { flex-wrap: wrap; }
+        .agent-wrap { overflow-wrap: anywhere; }
+        .agent-diff { overflow: auto; max-height: 14rem; white-space: pre; }
+        .agent-record { overflow: auto; max-height: 12rem; }
+        .agent-evidence > div { display: flex; justify-content: space-between; gap: .75rem; padding-bottom: .5rem; margin-bottom: .5rem; border-bottom: 1px solid #f3f4f6; }
+        .agent-evidence dt { color: #6b7280; flex-shrink: 0; }
+        .agent-evidence dd { font-family: ui-monospace, monospace; color: #1f2937; text-align: right; overflow-wrap: anywhere; min-width: 0; }
         @media (max-width: 1279px) {
             .agent-session-row { grid-template-columns: minmax(0, 1fr); }
+            .agent-session-heading { flex-direction: column; }
+        }
+        @media (max-width: 767px) {
+            .agent-session-meta { grid-template-columns: minmax(0, 1fr); }
+            .agent-file-heading { flex-direction: column; }
+            .agent-alert-panel { padding: 1rem; }
         }
     </style>
 </head>
@@ -34,81 +56,158 @@
         </button>
     </header>
 
-    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <article class="bg-white rounded-xl border p-4 flex items-center justify-between">
-            <div><p class="text-sm text-gray-500">总告警数</p><p class="text-2xl font-bold" x-text="agentSessionPagination.total || 0"></p></div>
-            <div class="p-2.5 bg-gray-100 rounded-full"><i class="fas fa-list-check text-gray-700 text-xl"></i></div>
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-3" aria-label="会话统计">
+        <article class="bg-white rounded-xl shadow-lg px-5 py-3 flex items-center justify-between">
+            <div><h2 class="text-sm font-medium text-gray-500">待人工处理</h2><p class="text-3xl font-bold text-red-600 mt-1" x-text="getAgentActionableCount()"></p></div>
+            <div class="p-2.5 bg-red-100 rounded-full flex items-center justify-center"><i class="fas fa-user-check text-red-600 text-xl"></i></div>
         </article>
-        <article class="bg-white rounded-xl border p-4 flex items-center justify-between">
-            <div><p class="text-sm text-gray-500">待人工处理</p><p class="text-2xl font-bold text-red-600" x-text="getAgentActionableCount()"></p></div>
-            <div class="p-2.5 bg-red-100 rounded-full"><i class="fas fa-user-check text-red-600 text-xl"></i></div>
+        <article class="bg-white rounded-xl shadow-lg px-5 py-3 flex items-center justify-between">
+            <div><h2 class="text-sm font-medium text-gray-500">已完成回退</h2><p class="text-3xl font-bold text-green-700 mt-1" x-text="getAgentCompletedCount()"></p></div>
+            <div class="p-2.5 bg-green-100 rounded-full flex items-center justify-center"><i class="fas fa-undo text-green-700 text-xl"></i></div>
         </article>
-        <article class="bg-white rounded-xl border p-4 flex items-center justify-between">
-            <div><p class="text-sm text-gray-500">已完成回退</p><p class="text-2xl font-bold text-green-700" x-text="getAgentCompletedCount()"></p></div>
-            <div class="p-2.5 bg-green-100 rounded-full"><i class="fas fa-undo text-green-700 text-xl"></i></div>
+        <article class="bg-white rounded-xl shadow-lg px-5 py-3 flex items-center justify-between">
+            <div><h2 class="text-sm font-medium text-gray-500">总告警数</h2><p class="text-3xl font-bold text-gray-900 mt-1" x-text="agentSessionPagination.total || 0"></p></div>
+            <div class="p-2.5 bg-gray-100 rounded-full flex items-center justify-center"><i class="fas fa-list-check text-gray-700 text-xl"></i></div>
         </article>
     </section>
 
-    <section class="bg-white rounded-xl border overflow-hidden">
-        <div class="px-5 py-4 border-b"><h2 class="font-semibold">智能体告警</h2></div>
+    <div class="bg-white rounded-xl shadow-lg p-1.5 mb-3">
+        <div class="agent-tab-active rounded-lg py-2 px-3 text-sm font-medium flex items-center justify-center shadow-md">
+            <i class="fas fa-robot mr-2"></i>智能体告警
+            <span class="ml-2 bg-white bg-opacity-20 text-xs font-bold px-2 py-0.5 rounded-full" x-text="agentSessionPagination.total || 0"></span>
+        </div>
+    </div>
+
+    <section class="agent-alert-panel bg-white rounded-lg shadow px-6 py-4" aria-label="智能体告警列表">
+        <h2 class="text-lg font-semibold text-red-500 mb-2">智能体告警
+            <span class="text-sm font-normal text-gray-600 ml-2" x-text="`(${agentSessionPagination.total || 0} items)`"></span>
+        </h2>
+        <div class="pb-2 mb-2 border-b border-gray-100">
+            <h3 class="text-sm font-medium text-gray-900">人工确认队列</h3>
+            <p class="text-xs text-gray-500 mt-0.5">仅点击“执行回退”后才会发布回退请求；接受变更会记录人工放行决策。</p>
+        </div>
         <div x-show="agentSessionsLoading && agentSessions.length === 0" class="p-8 text-center text-gray-500">加载中...</div>
-        <div x-show="agentSessionError" class="p-4 bg-red-50 text-red-700" x-text="agentSessionError"></div>
+        <div x-show="agentSessionError" role="alert" class="p-4 bg-red-50 text-red-700" x-text="agentSessionError"></div>
         <div x-show="!agentSessionsLoading && agentSessions.length === 0" class="p-8 text-center text-gray-500">暂无智能体告警</div>
 
         <template x-for="session in agentSessions" :key="session.run_id">
-            <article class="p-5 border-b last:border-b-0">
-                <div class="agent-session-row">
-                    <div class="min-w-0">
-                        <div class="flex items-center gap-2 mb-2">
-                            <span class="font-mono text-sm" x-text="session.run_id"></span>
-                            <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="getAgentRiskClass(getAgentAdjudication(session).risk_level)" x-text="getAgentRiskLabel(getAgentAdjudication(session).risk_level)"></span>
-                            <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="getAgentDispositionClass(session)" x-text="getAgentDispositionStatus(session)"></span>
-                        </div>
-                        <p class="text-sm text-gray-700 mb-3" x-text="session.original_request || '未记录原始请求'"></p>
-                        <dl class="grid md:grid-cols-3 gap-3 text-sm">
-                            <div><dt class="text-gray-500">变更风险分析</dt><dd x-text="getAgentAdjudication(session).summary || '分析处理中'"></dd></div>
-                            <div><dt class="text-gray-500">本次变更</dt><dd x-text="`${getAgentChangedFiles(session).length} 个文件`"></dd></div>
-                            <div><dt class="text-gray-500">更新时间</dt><dd x-text="formatDate(session.updated_at || session.created_at)"></dd></div>
-                        </dl>
-                        <details class="mt-3">
-                            <summary class="cursor-pointer text-sm text-teal-700">运行证据与文件预览</summary>
-                            <template x-for="file in getAgentChangedFiles(session)" :key="file.path">
-                                <div class="mt-2 rounded border p-3 text-xs">
-                                    <div class="font-mono" x-text="file.path"></div>
-                                    <div x-show="file.diff_truncated" class="text-amber-700">diff 预览已截断</div>
-                                    <pre class="mt-2 overflow-auto whitespace-pre-wrap" x-text="file.diff || file.summary || ''"></pre>
-                                </div>
-                            </template>
-                        </details>
-                        <div x-show="getAgentRollbackError(session)" class="mt-3 text-sm text-red-700">
+            <article class="agent-session-card border border-gray-200 rounded-lg bg-white hover:border-gray-300 transition-colors mb-2" x-data="{ expanded: false }">
+                <div class="agent-session-row px-3 py-2.5">
+                    <button type="button" class="agent-session-toggle min-w-0 text-left" @click="expanded = !expanded"
+                            :aria-expanded="expanded" :aria-controls="'session-details-' + session.run_id" :aria-label="(expanded ? '收起会话 ' : '展开会话 ') + session.run_id">
+                        <span class="agent-session-heading">
+                            <span class="flex flex-wrap items-center gap-2 min-w-0">
+                                <span class="font-mono text-sm text-gray-900 break-all" x-text="session.run_id"></span>
+                                <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="getAgentRiskClass(getAgentAdjudication(session).risk_level)" x-text="getAgentRiskLabel(getAgentAdjudication(session).risk_level)"></span>
+                                <span class="px-2 py-0.5 rounded-full text-xs font-medium border" :class="getAgentIntentAlignmentClass(getAgentAdjudication(session).intent_alignment)" x-text="getAgentIntentAlignmentLabel(getAgentAdjudication(session).intent_alignment)"></span>
+                                <span class="px-2 py-0.5 rounded-full text-xs font-medium" :class="getAgentDispositionClass(session)" x-text="getAgentDispositionStatus(session)"></span>
+                            </span>
+                            <span class="flex items-center gap-2 text-xs text-gray-500 whitespace-nowrap">
+                                <span x-text="formatDate(session.updated_at || session.created_at)"></span>
+                                <i class="fas text-gray-400" :class="expanded ? 'fa-chevron-up' : 'fa-chevron-down'" aria-hidden="true"></i>
+                            </span>
+                        </span>
+                        <span class="block mt-1 text-sm text-gray-700 truncate" x-text="getAgentAdjudication(session).summary || session.original_request || '分析处理中'"></span>
+                        <span x-show="getAgentRollbackError(session)" class="block mt-1 text-xs text-red-700 truncate">
                             <strong>回退失败原因：</strong><span x-text="getAgentRollbackError(session)"></span>
-                        </div>
-                    </div>
-                    <div x-show="canActOnAgentSession(session)" class="flex items-center justify-end gap-1.5 flex-nowrap">
-                        <button data-agent-action="accept" :data-run-id="session.run_id" @click="acceptAgentSession(session)"
+                        </span>
+                        <span class="agent-session-meta mt-1.5 text-xs text-gray-500">
+                            <span class="min-w-0 flex items-center"><i class="fas fa-folder-open mr-1.5 text-gray-400"></i><span class="truncate" x-text="session.workspace || '-'"></span></span>
+                            <span><i class="fas fa-file-code mr-1.5 text-gray-400"></i><span x-text="`${getAgentChangedFiles(session).length} 个变更文件`"></span></span>
+                            <span class="min-w-0 flex items-center"><i class="fas fa-undo mr-1.5 text-gray-400"></i><span class="truncate" x-text="session.nono?.session_id || '-'"></span></span>
+                        </span>
+                    </button>
+                    <div x-show="canActOnAgentSession(session)" class="agent-session-actions flex items-center justify-end gap-1.5 flex-nowrap">
+                        <button type="button" data-agent-action="accept" :data-run-id="session.run_id" @click="acceptAgentSession(session)"
                                 :aria-disabled="!canActOnAgentSession(session) || agentSessionActionInFlight[session.run_id]"
                                 onclick="return window.handleAgentSessionAction(event, this)"
                                 class="flex-none px-2.5 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200 text-xs whitespace-nowrap">
                             <i class="fas fa-check mr-1"></i>接受变更
                         </button>
-                        <button data-agent-action="rollback" :data-run-id="session.run_id" @click="rollbackAgentSession(session)"
+                        <button type="button" data-agent-action="rollback" :data-run-id="session.run_id" @click="rollbackAgentSession(session)"
                                 :aria-disabled="!canActOnAgentSession(session) || agentSessionActionInFlight[session.run_id]"
                                 onclick="return window.handleAgentSessionAction(event, this)"
-                                class="flex-none px-2 py-1 rounded bg-red-600 text-white text-xs"
-                                x-text="agentSessionActionInFlight[session.run_id] ? '回退请求中...' : '执行回退'"></button>
-                        <button data-agent-action="delete" :data-run-id="session.run_id" @click="deleteAgentSession(session)"
+                                class="flex-none px-2.5 py-1 rounded bg-red-500 text-white hover:bg-red-600 text-xs whitespace-nowrap">
+                            <i class="fas fa-undo mr-1"></i><span x-text="agentSessionActionInFlight[session.run_id] ? '回退请求中...' : '执行回退'"></span>
+                        </button>
+                        <button type="button" data-agent-action="delete" :data-run-id="session.run_id" @click="deleteAgentSession(session)"
                                 :aria-disabled="agentSessionActionInFlight[session.run_id]" aria-label="删除告警" title="删除告警"
                                 onclick="return window.handleAgentSessionAction(event, this)"
-                                class="flex-none w-6 h-6 text-gray-500"><i class="fas fa-trash"></i></button>
+                                class="flex-none w-6 h-6 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded text-xs"><i class="fas fa-trash-alt"></i></button>
+                    </div>
+                </div>
+
+                <div x-show="expanded" x-cloak :id="'session-details-' + session.run_id" class="agent-session-details border-t border-gray-200 px-4 py-4">
+                    <div class="agent-detail-grid text-sm">
+                        <div class="space-y-4 min-w-0">
+                            <section>
+                                <div class="agent-analysis-heading mb-2">
+                                    <h3 class="font-semibold text-gray-900">变更风险分析</h3>
+                                    <div class="flex flex-wrap gap-2">
+                                        <span class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700 border" x-text="getAgentVerdictLabel(getAgentAdjudication(session).verdict)"></span>
+                                        <span class="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700 border" x-text="getAgentRecommendedActionLabel(getAgentAdjudication(session).recommended_action)"></span>
+                                        <span class="px-2 py-0.5 rounded text-xs border" :class="getAgentIntentAlignmentClass(getAgentAdjudication(session).intent_alignment)" x-text="getAgentIntentAlignmentLabel(getAgentAdjudication(session).intent_alignment)"></span>
+                                    </div>
+                                </div>
+                                <div class="agent-wrap bg-gray-50 border border-gray-200 rounded p-3 text-gray-700 whitespace-pre-wrap" x-text="getAgentAdjudication(session).summary || '分析处理中'"></div>
+                            </section>
+                            <section>
+                                <h3 class="font-semibold text-gray-900 mb-2">本次变更</h3>
+                                <div x-show="getAgentChangedFiles(session).length === 0" class="bg-gray-50 border border-gray-200 rounded p-3 text-gray-500">暂无变更文件记录</div>
+                                <div class="space-y-2">
+                                    <template x-for="file in getAgentChangedFiles(session)" :key="file.path">
+                                        <div class="border border-gray-200 rounded p-3 bg-white min-w-0">
+                                            <div class="agent-file-heading">
+                                                <span class="font-mono text-xs text-gray-800 break-all" x-text="file.path"></span>
+                                                <span class="text-xs text-gray-500 whitespace-nowrap" x-text="`${getAgentChangeTypeLabel(file.change_type)} · +${file.added_lines || 0} / -${file.deleted_lines || 0}`"></span>
+                                            </div>
+                                            <pre class="agent-diff mt-2 bg-gray-900 text-gray-100 rounded p-3 text-xs" x-text="file.diff || file.summary || '无文本 diff 预览'"></pre>
+                                            <div x-show="file.diff_truncated" class="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">diff 预览已截断，原始长度 <span x-text="file.diff_original_chars || 0"></span> 字符</div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </section>
+                            <section>
+                                <h3 class="font-semibold text-gray-900 mb-2">原始请求</h3>
+                                <div class="agent-wrap bg-gray-50 border border-gray-200 rounded p-3 text-gray-700 whitespace-pre-wrap" x-text="session.original_request || '未记录原始请求'"></div>
+                            </section>
+                        </div>
+                        <aside class="space-y-4 min-w-0" aria-label="运行证据">
+                            <section>
+                                <h3 class="font-semibold text-gray-900 mb-2">运行证据</h3>
+                                <dl class="agent-evidence text-xs">
+                                    <div><dt>workspace</dt><dd x-text="session.workspace || '-'"></dd></div>
+                                    <div><dt>nono session</dt><dd x-text="session.nono?.session_id || '-'"></dd></div>
+                                    <div><dt>state home</dt><dd x-text="session.nono?.state_home || '-'"></dd></div>
+                                    <div><dt>diff sha256</dt><dd x-text="session.diff_ref?.sha256 || '-'"></dd></div>
+                                </dl>
+                            </section>
+                            <section>
+                                <h3 class="font-semibold text-gray-900 mb-2">执行命令</h3>
+                                <pre class="agent-record bg-gray-50 border border-gray-200 rounded p-3 text-xs" x-text="JSON.stringify(session.agent_command || [], null, 2)"></pre>
+                            </section>
+                            <section x-show="getAgentRollbackError(session)">
+                                <h3 class="font-semibold text-gray-900 mb-2">回退失败原因</h3>
+                                <div class="agent-wrap bg-red-50 border border-red-200 rounded p-3 text-xs text-red-800 whitespace-pre-wrap" x-text="getAgentRollbackError(session)"></div>
+                            </section>
+                            <section>
+                                <h3 class="font-semibold text-gray-900 mb-2">nono 状态</h3>
+                                <pre class="agent-record bg-gray-50 border border-gray-200 rounded p-3 text-xs" x-text="JSON.stringify(session.nono || {}, null, 2)"></pre>
+                            </section>
+                            <section>
+                                <h3 class="font-semibold text-gray-900 mb-2">记录摘要</h3>
+                                <pre class="agent-record bg-gray-50 border border-gray-200 rounded p-3 text-xs" x-text="JSON.stringify({ run_id: session.run_id, status: session.status, decision: session.decision, rollback_status: session.rollback_status, adjudication: getAgentAdjudication(session), created_at: session.created_at, updated_at: session.updated_at }, null, 2)"></pre>
+                            </section>
+                        </aside>
                     </div>
                 </div>
             </article>
         </template>
 
-        <nav x-show="agentSessionPagination.pages > 1" class="flex justify-between items-center p-4">
-            <button @click="changeAgentSessionPage(agentSessionPagination.page - 1)" :disabled="agentSessionPagination.page <= 1">上一页</button>
-            <span x-text="`${agentSessionPagination.page} / ${agentSessionPagination.pages}`"></span>
-            <button @click="changeAgentSessionPage(agentSessionPagination.page + 1)" :disabled="agentSessionPagination.page >= agentSessionPagination.pages">下一页</button>
+        <nav x-show="agentSessionPagination.pages > 1" class="flex justify-center items-center gap-2 mt-6" aria-label="会话分页">
+            <button @click="changeAgentSessionPage(agentSessionPagination.page - 1)" :disabled="agentSessionPagination.page <= 1" class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">上一页</button>
+            <span class="text-sm text-gray-600" x-text="`第 ${agentSessionPagination.page} 页 / 共 ${agentSessionPagination.pages} 页`"></span>
+            <button @click="changeAgentSessionPage(agentSessionPagination.page + 1)" :disabled="agentSessionPagination.page >= agentSessionPagination.pages" class="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">下一页</button>
         </nav>
     </section>
 </main>
@@ -237,8 +336,23 @@ function agentGuardDashboard() {
             if (session.rollback_status === 'completed') return 'bg-gray-100 text-gray-700';
             return 'bg-yellow-100 text-yellow-800';
         },
-        getAgentRiskLabel(level) { return ({critical: '严重', high: '高', medium: '中', low: '低'})[level] || '未知'; },
-        getAgentRiskClass(level) { return ({critical: 'bg-red-100 text-red-800', high: 'bg-red-50 text-red-700', medium: 'bg-yellow-100 text-yellow-800', low: 'bg-green-100 text-green-800'})[level] || 'bg-gray-100 text-gray-700'; },
+        getAgentRiskLabel(level) { return ({critical: '严重风险', high: '高风险', medium: '中风险', low: '低风险'})[level] || '风险待定'; },
+        getAgentRiskClass(level) { return ({critical: 'bg-red-200 text-red-900', high: 'bg-orange-100 text-orange-800', medium: 'bg-yellow-100 text-yellow-800', low: 'bg-green-100 text-green-800'})[level] || 'bg-gray-100 text-gray-700'; },
+        getAgentVerdictLabel(verdict) {
+            return ({allow: '允许变更', warn: '风险警告', deny: '拒绝变更', needs_human_review: '需人工审阅'})[verdict] || verdict || '裁决未知';
+        },
+        getAgentIntentAlignmentLabel(alignment) {
+            return ({aligned: '意图一致', partially_aligned: '部分超出', out_of_intent: '超出意图', unknown: '无法判断'})[alignment] || '无法判断';
+        },
+        getAgentIntentAlignmentClass(alignment) {
+            return ({aligned: 'bg-blue-50 text-blue-700 border-blue-200', partially_aligned: 'bg-purple-50 text-purple-700 border-purple-200', out_of_intent: 'bg-red-50 text-red-700 border-red-200'})[alignment] || 'bg-gray-50 text-gray-600 border-gray-200';
+        },
+        getAgentRecommendedActionLabel(action) {
+            return ({accept: '建议接受', ask_user: '建议人工确认', rollback: '建议回退'})[action] || action || '建议待定';
+        },
+        getAgentChangeTypeLabel(changeType) {
+            return ({added: '新增', created: '新增', modified: '修改', changed: '修改', deleted: '删除', removed: '删除', renamed: '重命名'})[changeType] || changeType || '变更';
+        },
         formatDate(value) { return value ? new Date(value).toLocaleString('zh-CN') : '-'; },
     };
 }

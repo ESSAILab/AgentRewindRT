@@ -98,11 +98,16 @@ def test_dashboard_has_no_network_analysis_mode():
 
 def test_agent_risk_classes_exist_in_static_css():
     html = TEMPLATE.read_text(encoding="utf-8")
-    css = TAILWIND_CSS.read_text(encoding="utf-8")
+    css = TAILWIND_CSS.read_text(encoding="utf-8") + html.split("<style>", 1)[1].split("</style>", 1)[0]
 
     expected_classes = [
-        "bg-red-100",
-        "text-red-800",
+        "bg-red-200",
+        "text-red-900",
+        "bg-orange-100",
+        "text-orange-800",
+        "bg-amber-50",
+        "text-amber-700",
+        "border-amber-200",
         "bg-red-50",
         "text-red-700",
         "bg-yellow-100",
@@ -301,4 +306,28 @@ const response = (body) => ({ok: true, json: async () => body});
 
     result = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=False)
 
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_review_labels_support_current_adjudication_values():
+    html = TEMPLATE.read_text(encoding="utf-8")
+    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+    result = subprocess.run(
+        ["node", "-e", "global.window = {};\n" + script + """
+const assert = require('node:assert/strict');
+const dashboard = agentGuardDashboard();
+assert.equal(dashboard.getAgentVerdictLabel('allow'), '允许变更');
+assert.equal(dashboard.getAgentVerdictLabel('warn'), '风险警告');
+assert.equal(dashboard.getAgentVerdictLabel('deny'), '拒绝变更');
+assert.equal(dashboard.getAgentVerdictLabel('needs_human_review'), '需人工审阅');
+assert.equal(dashboard.getAgentIntentAlignmentLabel('partially_aligned'), '部分超出');
+assert.equal(dashboard.getAgentRecommendedActionLabel('ask_user'), '建议人工确认');
+assert.equal(dashboard.getAgentRecommendedActionLabel('rollback'), '建议回退');
+assert.equal(dashboard.getAgentVerdictLabel(null), '裁决未知');
+assert.equal(dashboard.getAgentIntentAlignmentLabel(null), '无法判断');
+assert.equal(dashboard.getAgentRecommendedActionLabel(null), '建议待定');
+assert.equal(dashboard.getAgentChangeTypeLabel('modified'), '修改');
+assert.equal(dashboard.getAgentChangeTypeLabel('future_type'), 'future_type');
+"""], capture_output=True, text=True, check=False,
+    )
     assert result.returncode == 0, result.stdout + result.stderr

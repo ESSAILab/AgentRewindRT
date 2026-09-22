@@ -1,13 +1,13 @@
 <div align="center">
 <img src="docs/assets/agentrewindrt-header.gif" alt="AgentRewindRT 项目名快速跳变动图" width="490" />
 
-**面向AI Agent提供安全沙箱，实时检测原始请求与工作空间变更的一致性，自动识别风险并支持异常会话的一键回滚**
+**一个支持异常变更检测和回溯的智能体沙箱**
 
  [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](ai_agent/pyproject.toml)  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 </div>
 
-AgentRewindRT基于[nono](https://github.com/nolabs-ai/nono)提供沙箱和快照回滚等基础运行时安全功能，并进一步扩展了智能体会话级意图与变更一致性安全分析能力。AgentRewindRT实时监测智能体工作空间变更，在变更与原始意图背离时自动发出告警和处置建议，用户可选择接受变更或请求恢复到指定快照。
+AgentRewindRT面向AI Agent提供安全执行沙箱，实时检测原始请求与工作空间变更的一致性，自动识别风险并支持异常会话的一键回滚。AgentRewindRT基于[nono](https://github.com/nolabs-ai/nono)提供沙箱和快照回滚等基础运行时安全功能，并进一步扩展了智能体会话级意图与变更一致性安全分析能力。AgentRewindRT实时监测智能体工作空间变更，在变更与原始意图背离时自动发出告警和处置建议，用户可选择接受变更或请求恢复到指定快照。
 
 项目适用于需要保留变更证据、检查智能体是否超出任务范围，并在审阅后恢复工作区文件的AI Agent工作场景。当前智能体会话级意图与变更一致性安全分析发生在会话结束之后，其无需在会话执行中要求用户的多次授权与处置，仅在会话结束后提供一次性告警，大大缓解传统智能体安全沙箱的告警疲劳问题。
 

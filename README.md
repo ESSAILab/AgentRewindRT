@@ -1,5 +1,5 @@
 <div align="center">
-<img src="docs/assets/agentrewindrt-header.gif" alt="AgentRewindRT 项目名快速跳变动图" width="490" />
+<img src="docs/assets/agentrewindrt-header.gif" alt="AgentRewindRT 项目名快速跳变动图" width="400" />
 
 **一个支持异常变更检测和回溯的智能体沙箱**
 

@@ -3,7 +3,7 @@
 
 **一个支持异常变更检测和回溯的智能体沙箱**
 
- [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](ai_agent/pyproject.toml)  [![Built on nono](https://img.shields.io/badge/Built%20on-nono-16816a)](https://github.com/nolabs-ai/nono)  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)[![LangGraph](https://img.shields.io/badge/Workflow-LangGraph-1C3C3C)](ai_agent/agent_guard/adjudication_graph.py)[![Docker Compose](https://img.shields.io/badge/Deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white)](deploy/docker-compose-agentguard.yml)
+ [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](ai_agent/pyproject.toml)  [![Built on nono](https://img.shields.io/badge/Built%20on-nono-16816a)](https://github.com/nolabs-ai/nono)  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)  [![LangGraph](https://img.shields.io/badge/Workflow-LangGraph-1C3C3C)](ai_agent/agent_guard/adjudication_graph.py)  [![Docker Compose](https://img.shields.io/badge/Deploy-Docker%20Compose-2496ED?logo=docker&logoColor=white)](deploy/docker-compose-agentguard.yml)
 </div>
 
 AgentRewindRT面向AI Agent提供安全执行沙箱，实时检测原始请求与工作空间变更的一致性，自动识别风险并支持异常会话的一键回滚。AgentRewindRT基于[nono](https://github.com/nolabs-ai/nono)提供沙箱和快照回滚等基础运行时安全功能，并进一步扩展了智能体会话级意图与变更一致性安全分析能力。AgentRewindRT实时监测智能体工作空间变更，在变更与原始意图背离时自动发出告警和处置建议，用户可选择接受变更或请求恢复到指定快照。

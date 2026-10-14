@@ -47,3 +47,7 @@ PYTHONPATH=. .venv/bin/python main.py
 | `DELETE` | `/agent-sessions/{run_id}` | 删除会话记录 |
 
 回退接口接收 JSON 请求体，例如 `{"requested_by":"reviewer","snapshot":0}`，并返回回退操作标识与状态。回退异步执行，需查询会话确认最终结果。Web UI 在端口 `30003` 通过 `/api/agent-sessions...` 代理会话接口；端口 `8000` 使用表中的原生路径。
+
+## OpenCode 意图证据
+
+OpenCode 入口将正式会话导出保存为 conversation，分析使用有序用户请求理解补充、更正与取消，助手回复仅作上下文。非 OpenCode 入口保留 original_request 兼容路径。采集缺失或不完整时意图为 unknown，不因文件变更看似合理就判定一致。运行依赖核验信息随事件保存，已核验的内嵌临时库保留审计记录；未知内容仍需审查。详见 [接入与验收](../deploy/OPENCODE_INTENT_SMOKE.md)。

@@ -77,7 +77,7 @@ flowchart LR
 | `hunk_summary` | 40,000 < 估算 token 数 ≤ 300,000 | 逐文件生成摘要，再汇总裁决 |
 | `risk_only` | 估算 token 数 > 300,000 | 标记高风险文件，以更小的文件内容预算生成摘要并汇总 |
 
-这些是token数为默认阈值。随仓库提供的 Compose 为方便验证三种策略，将两级阈值设为 **200 / 800**，文件与 hunk 预算设为 **300 / 80**。摘要数量及内容长度均有上限，因此大 diff 分析不等于对所有修改的完整审查。
+当前 Compose 不覆盖上述默认阈值；文件与 hunk 内容预算默认分别为 24,000 / 6,000 token。`small / medium / large` 是测试数据名称，不保证分别触发三种策略。摘要数量及内容长度均有上限，大 diff 分析不等于对所有修改的完整审查。
 
 ### 如何解读分析结果
 
@@ -86,6 +86,16 @@ flowchart LR
 ![Web UI 会话审阅：统计卡片、风险与意图标签、变更风险分析及文件 diff](docs/assets/webui-1.png)
 
 ![Web UI 会话审阅续图：原始请求、运行证据、执行命令、nono 状态和记录摘要](docs/assets/webui-2.png)
+
+审阅时可依次检查：
+
+1. 找到对应 run_id，确认工作区和执行命令。
+2. 查看真实用户请求、历史上下文与采集状态；“采集完整”不代表变更一致。
+3. 阅读“用户请求摘要”，它是模型整理结果，应与实际用户原文核对。
+4. 查看裁决、风险等级及意图一致性结论。
+5. 核对每个文件 diff 和行数；预览截断不代表完整内容不存在。
+6. 检查运行证据：已核验临时库保留大小和指纹，未展示二进制内容不能当作空文件。
+7. 决定接受或请求回退；接受建议不等于人工已接受，回退请求也不等于实际回退完成。
 
 ## 快速开始
 
@@ -121,7 +131,7 @@ export BACKEND_API_KEY='replace-with-a-strong-backend-api-key'
 ./scripts/agentguard-compose ps
 ```
 
-两个根目录必须是已存在、不同且不为 `/` 的绝对目录。使用 `scripts/agentguard-compose` 启动，由它校验路径并传入 Compose 所需变量。
+两个根目录必须是已存在、不同且不为 `/` 的绝对目录，并以相同绝对路径挂载到后端。不要将这两个变量设为 `/`。使用 `scripts/agentguard-compose` 启动，由它校验路径并传入 Compose 所需变量。
 
 首次启动需要下载镜像并安装依赖。`minio-init` 创建 `agent-diffs` bucket 后正常退出，其余五个服务应保持运行。查看日志并检查接口：
 
@@ -196,7 +206,14 @@ export DEEPXDR_AGENT_RUN_ID="run-$(date +%Y%m%d%H%M%S)"
 cd "$REPO_ROOT"
 ```
 
-`--` 后的命令决定实际执行任务的智能体。`DEEPXDR_AGENT_ORIGINAL_REQUEST` 用于记录分析依据，**不会自动把任务传给智能体**；请通过该 CLI 的参数或交互入口提交任务，并配置所需文件与网络权限。后端的 `OPENAI_*` 变量也不会自动配置智能体模型。
+`--` 后的命令决定实际执行任务的智能体。非 OpenCode 入口使用 `DEEPXDR_AGENT_ORIGINAL_REQUEST` 记录分析依据，**不会自动把任务传给智能体**；请通过该 CLI 的参数或交互入口提交任务，并配置所需文件与网络权限。后端的 `OPENAI_*` 变量也不会自动配置智能体模型。
+
+OpenCode 入口自动关联本次运行的会话和消息 ID，退出后导出正式对话，结合多轮补充、更正和取消要求分析最终 diff，不用遗留任务变量覆盖实际交互。采集不完整时意图显示证据不足；助手回复仅作上下文，不构成用户授权。分析在退出并完成后端处理后显示，并非逐轮实时裁决。
+
+- [OpenCode 多轮接入与验收](deploy/OPENCODE_INTENT_SMOKE.md)
+- [运行依赖核验与 diff 展示](deploy/OPENCODE_RUNTIME_ARTIFACTS_SMOKE.md)
+- [双终端外部修改演示](deploy/OPENCODE_EXTERNAL_CHANGE_DEMO.md)
+- [本轮已验证结果与边界](deploy/OPENCODE_VALIDATION.md)
 
 更多示例、`medium` / `large` 策略验证以及 OpenCode 接入见 [智能体接入与冒烟测试指南](deploy/AGENTGUARD_SMOKE.md)。
 

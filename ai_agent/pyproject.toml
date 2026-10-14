@@ -46,3 +46,6 @@ include = [
     "agent_guard*",
     "shared*",
 ]
+
+[tool.setuptools.package-data]
+agent_guard = ["opencode_plugin.mjs"]

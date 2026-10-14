@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from ai_agent.agent_guard import nono_shim
 
 
@@ -116,3 +118,67 @@ def test_nono_shim_publishes_to_agent_session_topic_by_default(monkeypatch):
         "topic": "agent.session.finished",
         "event": event,
     }
+
+
+def test_interactive_only_applies_to_agent_launch(monkeypatch):
+    calls = []
+    def run(command, **kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout=None, stderr=None)
+    monkeypatch.setattr(subprocess, 'run', run)
+    nono_shim._run_command(['nono', 'run'], env={'DEEPXDR_NONO_INTERACTIVE': '1'}, interactive=True)
+    nono_shim._run_command(['nono', 'rollback', 'show'], env={'DEEPXDR_NONO_INTERACTIVE': '1'})
+    assert calls[0]['capture_output'] is False
+    assert calls[1]['capture_output'] is True
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_opencode_shim_collects_real_plugin_hooks_and_formal_export(tmp_path, monkeypatch, exit_code):
+    """Local contract harness: runs the actual plugin, not an actual model/agent."""
+    import sys
+    from ai_agent.agent_guard.event_validation import validate_finished_session_event
+    agent = tmp_path / 'opencode'
+    agent.write_text('#!' + sys.executable + '\n' + '''
+import json, os, subprocess, sys, time
+from pathlib import Path
+store = Path(os.environ['TEST_SESSION_STORE'])
+if sys.argv[1:] == ['export','ses_test']:
+    print(store.read_text()); sys.exit(0)
+config = json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])
+plugin = config['plugin'][-1]
+messages=[]
+for i,text in enumerate(['创建 wangbo.md','在文件末尾追加日期']):
+    mid='msg_'+str(i)
+    messages.append({'info':{'id':mid,'sessionID':'ses_test','role':'user','time':{'created':time.time_ns()//1000000}},'parts':[{'type':'text','text':text}]})
+script = "const {default: plugin}=await import(process.argv[1]); const hooks=await plugin({directory:process.cwd()}); for (const id of ['msg_0','msg_1']) await hooks['chat.message']({sessionID:'ses_test'},{message:{id},parts:[]});"
+subprocess.run(['node','--input-type=module','-e',script,plugin],check=True)
+store.write_text(json.dumps({'info':{'id':'ses_test','directory':os.getcwd()},'messages':messages}))
+sys.exit(int(os.environ.get('TEST_AGENT_EXIT', '0')))
+''')
+    agent.chmod(0o755)
+    nono = tmp_path / 'nono.real'
+    nono.write_text('#!' + sys.executable + '\n' + '''
+import json,subprocess,sys
+if sys.argv[1]=='run':
+    r=subprocess.run(sys.argv[sys.argv.index('--')+1:]); print(json.dumps({'session_id':'nono_test'}));sys.exit(r.returncode)
+if '--json' in sys.argv: print('{}')
+else: print('diff --git a/wangbo.md b/wangbo.md\\n+++ b/wangbo.md\\n@@\\n+20261012')
+''')
+    nono.chmod(0o755)
+    workspace=tmp_path/'work'; workspace.mkdir(); monkeypatch.chdir(workspace)
+    env = {'DEEPXDR_REAL_NONO':str(nono), 'DEEPXDR_AGENT_EVENTS_FILE':str(tmp_path/'events'),
+        'DEEPXDR_AGENT_EVIDENCE_DIR':str(tmp_path/'evidence'), 'TEST_SESSION_STORE':str(tmp_path/'export.json'),
+        'DEEPXDR_AGENT_ORIGINAL_REQUEST':'这条旧任务必须被忽略', 'DEEPXDR_AGENT_RUN_ID':'integration-run',
+        'PATH':str(tmp_path)+os.pathsep+os.environ['PATH'], 'TEST_AGENT_EXIT':str(exit_code)}
+    for key,value in env.items(): monkeypatch.setenv(key,value)
+    for key in ['DEEPXDR_AGENT_KAFKA_BOOTSTRAP_SERVERS','KAFKA_BOOTSTRAP_SERVERS','OPENCODE_CONFIG_CONTENT']:
+        monkeypatch.delenv(key,raising=False)
+    args=['run','--rollback','--allow',str(workspace),'--','/usr/bin/env','XDG_STATE_HOME='+str(tmp_path/'agentstate'),'opencode']
+    assert nono_shim.main(args)==exit_code
+    e=json.loads((tmp_path/'events').read_text())
+    assert e['nono']['exit_code']==exit_code
+    assert e['conversation']['status']=='complete', e['conversation']['errors']
+    assert len(e['conversation']['messages'])==2
+    assert e['original_request']=='创建 wangbo.md\n在文件末尾追加日期'
+    assert e['agent_command']==args[args.index('--')+1:]
+    assert validate_finished_session_event(e)['conversation']['run_id']=='integration-run'

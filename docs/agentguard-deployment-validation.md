@@ -270,3 +270,7 @@ git pull --ff-only
 - [ ] 页面布局、Logo、统计图标和三个操作按钮显示正常；
 - [ ] 日志中没有持续性的 Kafka、数据库、MinIO 或 LLM 错误；
 - [ ] 部署文档和 Git 中不包含真实密码或 API Key。
+
+## OpenCode 正式会话接入补充
+
+真实多轮接入以 [OpenCode 多轮验收](../deploy/OPENCODE_INTENT_SMOKE.md) 为准，自动 agent 冒烟以 [冒烟指南](../deploy/AGENTGUARD_SMOKE.md) 为准；[验证记录](../deploy/OPENCODE_VALIDATION.md) 区分已实测结果与待验收场景。当前 Compose 不再设置低 token 阈值，small/medium/large 用例不保证分别触发三种策略。宿主机入口、后端和模板需同步更新；本次复用 JSON 字段，无数据库迁移。

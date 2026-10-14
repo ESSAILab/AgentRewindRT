@@ -30,7 +30,6 @@ case "$CASE" in
     ;;
   agent)
     AGENT_PROMPT="Edit README.md. Add a short section titled Agent Result explaining that this file was modified by a real opencode agent under nono. Keep it concise."
-    AGENT_COMMAND="mkdir -p .opencode-runtime/home .opencode-runtime/config .opencode-runtime/cache .opencode-runtime/data .opencode-runtime/state && HOME='$WORKSPACE/.opencode-runtime/home' XDG_CONFIG_HOME='$WORKSPACE/.opencode-runtime/config' XDG_CACHE_HOME='$WORKSPACE/.opencode-runtime/cache' XDG_DATA_HOME='$WORKSPACE/.opencode-runtime/data' XDG_STATE_HOME='$WORKSPACE/.opencode-runtime/state' opencode run --model deepxdr/deepseek-v3-2-251201 --auto '$AGENT_PROMPT'"
     DEFAULT_ORIGINAL_REQUEST="$AGENT_PROMPT"
     ;;
   *)
@@ -59,7 +58,12 @@ rm -rf "$WORKSPACE"
 PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" python -m scripts.agentguard_smoke_cases "$CASE" "$WORKSPACE" >/dev/null
 
 export DEEPXDR_REAL_NONO
-export DEEPXDR_AGENT_ORIGINAL_REQUEST=${DEEPXDR_AGENT_ORIGINAL_REQUEST:-"$DEFAULT_ORIGINAL_REQUEST"}
+if [ "$CASE" = "agent" ]; then
+  unset DEEPXDR_AGENT_ORIGINAL_REQUEST
+  mkdir -p "$WORKSPACE/.opencode-runtime/state"
+else
+  export DEEPXDR_AGENT_ORIGINAL_REQUEST=${DEEPXDR_AGENT_ORIGINAL_REQUEST:-"$DEFAULT_ORIGINAL_REQUEST"}
+fi
 export DEEPXDR_AGENT_RUN_ID=${DEEPXDR_AGENT_RUN_ID:-"smoke-$CASE-$(date +%Y%m%d%H%M%S)"}
 export KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-"localhost:29092"}
 export DEEPXDR_AGENT_SESSION_TOPIC=${DEEPXDR_AGENT_SESSION_TOPIC:-"agent.session.finished"}
@@ -76,8 +80,9 @@ printf 'Running nono smoke case=%s in %s with run_id=%s\n' "$CASE" "$WORKSPACE" 
 (
   cd "$WORKSPACE"
   if [ "$CASE" = "agent" ]; then
-    "$REPO_ROOT/scripts/nono" run --profile always-further/opencode --allow-domain "https://ark.cn-beijing.volces.com/**" --rollback --no-rollback-prompt --rollback-exclude .opencode-runtime --rollback-exclude opencode --rollback-exclude opentui --allow "$WORKSPACE" -- \
-      /bin/sh -c "$AGENT_COMMAND"
+    "$REPO_ROOT/scripts/nono" run --profile "${AGENTGUARD_SMOKE_PROFILE:-nolabs-ai/opencode}" --allow-domain "${AGENTGUARD_SMOKE_ALLOW_DOMAIN:-https://ark.cn-beijing.volces.com/**}" --rollback --no-rollback-prompt --rollback-exclude .opencode-runtime --rollback-exclude opencode --rollback-exclude opentui --allow "$WORKSPACE" -- \
+      /usr/bin/env XDG_STATE_HOME="$WORKSPACE/.opencode-runtime/state" \
+      opencode run --model "${AGENTGUARD_SMOKE_MODEL:-agent-test/deepseek-v4-flash}" "$AGENT_PROMPT"
   else
     "$REPO_ROOT/scripts/nono" run --rollback --no-rollback-prompt --allow "$WORKSPACE" -- \
       /bin/sh -c "$AGENT_COMMAND"

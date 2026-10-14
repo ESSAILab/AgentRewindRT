@@ -264,7 +264,7 @@ def test_agentguard_compose_rejects_unsafe_roots_before_docker(tmp_path):
         assert not capture.exists()
 
 
-@pytest.mark.parametrize("document", ["README.md", "README_EN.md", "deploy/AGENTGUARD_SMOKE.md"])
+@pytest.mark.parametrize("document", ["README.md", "deploy/AGENTGUARD_SMOKE.md"])
 def test_agentguard_docs_define_host_rollback_roots(document):
     text = (REPO_ROOT / document).read_text(encoding="utf-8")
 
@@ -273,9 +273,5 @@ def test_agentguard_docs_define_host_rollback_roots(document):
     assert "--allow" in text
     assert "scripts/agentguard-compose" in text
 
-    if document == "README.md":
-        assert "相同绝对路径" in text
-        assert "不要将这两个变量设为 `/`" in text
-    else:
-        assert "same absolute" in text
-        assert "must not" in text or "Do not set either variable to `/`" in text
+    assert "相同绝对路径" in text
+    assert "不要将这两个变量设为 `/`" in text

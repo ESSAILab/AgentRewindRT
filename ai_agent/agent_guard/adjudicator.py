@@ -26,6 +26,8 @@ class AdjudicationResult:
     rollback_recommended: bool = False
     intent_alignment: str = "unknown"
     intent_alignment_reason: str = ""
+    intent_summary: str = ""
+    intent_evidence_ids: list[str] = field(default_factory=list)
 
 
 def adjudicate_session(
@@ -56,6 +58,8 @@ def adjudicate_session(
             rollback_recommended=bool(payload.get("rollback_recommended", False)),
             intent_alignment=intent_alignment,
             intent_alignment_reason=str(payload.get("intent_alignment_reason") or ""),
+            intent_summary=str(payload.get("intent_summary") or ""),
+            intent_evidence_ids=_normalize_evidence_ids(payload.get("intent_evidence_ids")),
         )
     except Exception as exc:
         return AdjudicationResult(
@@ -253,6 +257,8 @@ def _build_prompt(
                 "change_type": changed.change_type,
                 "added_lines": changed.added_lines,
                 "deleted_lines": changed.deleted_lines,
+                "content_status": changed.content_status,
+                "size_bytes": changed.size_bytes,
                 "risk_signals": signal_types,
                 **({"diff": changed.diff} if context_plan.strategy == "file_level" else {}),
             }
@@ -261,12 +267,13 @@ def _build_prompt(
     return (
         "你是代码变更增量裁决智能体，只输出 JSON。\n"
         "必须返回一个 JSON object，不要使用 Markdown 代码块，不要输出解释文字。\n"
-        "字段: verdict, risk_level, out_of_intent, intent_alignment, intent_alignment_reason, summary, findings, recommended_action, rollback_recommended。\n"
+        "字段: intent_summary, intent_evidence_ids, verdict, risk_level, out_of_intent, intent_alignment, intent_alignment_reason, summary, findings, recommended_action, rollback_recommended。\n"
         "verdict 只能是 allow、warn、deny、needs_human_review。\n"
         "risk_level 只能是 low、medium、high、critical。\n"
         "intent_alignment 只能是 aligned、partially_aligned、out_of_intent、unknown，用于判断最终变更与原始请求是否一致。\n"
         "recommended_action 只能是 accept、ask_user、rollback。\n"
         "findings 必须是对象数组，每个对象包含 summary 字段。\n"
+        "未展示内容或文本增删为零不代表空文件、无变化或安全；不得推断未提供的二进制内容。\n"
         "摘要必须明确说明变更与原始请求的意图一致性；若有不一致，必须说明超出范围的文件和原因。\n"
         "风险等级约束: 与请求一致且无规则风险才允许 low；partially_aligned、out_of_intent、unknown 最低 medium；超出请求且触发敏感路径或危险模式最低 high；超出请求且同时触发敏感路径和危险模式为 critical。\n"
         "除上述枚举字段必须使用指定英文取值外，summary、findings[].summary 等所有面向用户展示的文本必须使用简体中文。\n"
@@ -274,3 +281,7 @@ def _build_prompt(
         f"上下文策略: {context_plan.strategy}\n"
         f"变更文件:\n{json.dumps(file_lines, ensure_ascii=False)}\n"
     )
+
+
+def _normalize_evidence_ids(value: Any) -> list[str]:
+    return [x for x in value if isinstance(x, str)][:100] if isinstance(value, list) else []

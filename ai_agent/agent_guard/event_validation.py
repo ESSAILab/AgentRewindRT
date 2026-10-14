@@ -4,6 +4,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .intent_evidence import validate_conversation
+
 
 def validate_finished_session_event(event: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalize an AgentGuard completed-session event."""
@@ -14,9 +16,16 @@ def validate_finished_session_event(event: dict[str, Any]) -> dict[str, Any]:
     if event.get("event_type") != "finished":
         raise ValueError("agent session event_type must be finished")
 
-    for field in ("run_id", "original_request", "workspace"):
+    for field in ("run_id", "workspace"):
         if not isinstance(event.get(field), str) or not event[field].strip():
             raise ValueError(f"agent session event requires {field}")
+    conversation = event.get("conversation")
+    if isinstance(conversation, dict) and conversation.get("source") == "opencode_export":
+        validate_conversation(conversation, event["run_id"])
+        if not isinstance(event.get("original_request"), str):
+            raise ValueError("original_request must be a string")
+    elif not isinstance(event.get("original_request"), str) or not event["original_request"].strip():
+        raise ValueError("agent session event requires original_request")
     if not Path(event["workspace"]).is_absolute():
         raise ValueError("agent session workspace must be absolute")
 

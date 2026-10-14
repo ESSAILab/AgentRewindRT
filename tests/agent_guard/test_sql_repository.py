@@ -278,3 +278,18 @@ def test_session_to_dict_returns_truncated_multi_file_change_preview():
     assert session["changed_files_preview"][1]["diff_truncated"] is False
     assert session["raw_event"]["changed_files"][0]["diff"] != large_diff
     assert session["raw_event"]["changed_files"][0]["diff_truncated"] is True
+
+
+def test_sql_repository_returns_conversation_and_model_intent_separately():
+    conversation = {'source':'opencode_export','status':'complete','messages':[{'text':'实际请求'}]}
+    row = SimpleNamespace(run_id='r', nono_session_id='n', original_request='兼容摘要',
+        agent_command=['opencode'], workspace='/workspace', diff_ref={}, conversation=conversation,
+        raw_event={'conversation':conversation}, status='adjudicated', decision=None,
+        rollback_status='not_requested', created_at=None, updated_at=None)
+    adjudication = SimpleNamespace(verdict='allow',risk_level='low',out_of_intent=False,confidence=None,
+        summary='文件风险摘要',findings=[],recommended_action='accept',rollback_recommended=False,
+        raw_result={'intent_summary':'模型整理的有效要求','intent_evidence_ids':['s/m']})
+    result = SqlAlchemyAgentSessionRepository._session_to_dict(row, adjudication=adjudication)
+    assert result['conversation']==conversation
+    assert result['adjudication']['intent_summary']=='模型整理的有效要求'
+    assert result['adjudication']['intent_evidence_ids']==['s/m']

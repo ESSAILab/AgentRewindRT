@@ -8,7 +8,7 @@
 
 - Kafka、PostgreSQL、MinIO、ai-agent 与 web-ui 已启动；`minio-init` 正常完成后退出。
 - 宿主机已安装集成入口的 Python 依赖，并将真实 nono 路径配置到 `DEEPXDR_REAL_NONO`。
-- 工作区位于 `AGENTGUARD_WORKSPACE_ROOT` 内，快照状态目录位于 `AGENTGUARD_NONO_STATE_ROOT` 内。两个根目录必须不同，且以相同绝对路径挂载到后端。
+- 工作区位于 `AGENTGUARD_WORKSPACE_ROOT` 内，快照状态目录位于 `AGENTGUARD_NONO_STATE_ROOT` 内。两个根目录必须不同，且以相同绝对路径挂载到后端。不要将这两个变量设为 `/`。
 - 接入真实智能体时，另行安装并配置该智能体的模型、凭据及所需 nono 权限。
 
 `OPENAI_BASE_URL`、`OPENAI_MODEL` 和 `OPENAI_API_KEY` 配置后端的变更分析模型。它们不会自动指定实际执行开发任务的智能体或其模型。
@@ -16,6 +16,8 @@
 详细环境准备、镜像构建与故障排查见 [部署与测试验证手册](../docs/agentguard-deployment-validation.md)。
 
 ## 真实项目中的智能体接入
+
+OpenCode 自由交互及多轮真实意图采集见 [OpenCode 多轮意图验收](OPENCODE_INTENT_SMOKE.md)。OpenCode 自动采集模式读取实际会话，不依赖预置任务变量；下方变量示例仍用于向命令行传入任务。
 
 以下示例以编码智能体修改项目文件为场景。将待修改的项目放入工作区根目录下，例如 `$AGENTGUARD_WORKSPACE_ROOT/my-project`，并将示例命令替换为实际智能体命令。
 
@@ -49,9 +51,9 @@ export DEEPXDR_AGENT_RUN_ID="run-$(date +%Y%m%d%H%M%S)"
 cd "$REPO_ROOT"
 ```
 
-这里的 `opencode` 指定智能体程序，`run` 是 OpenCode 执行任务的子命令，后面的字符串是实际传给它的任务。`DEEPXDR_AGENT_ORIGINAL_REQUEST` 本身只记录任务供后端分析；本例通过命令参数显式将同一任务传给 OpenCode。命令用法见 [OpenCode CLI 文档](https://opencode.ai/docs/cli/#run)。nono 还需授权 OpenCode 访问其配置、运行目录及模型服务；需根据本机安装的 nono 版本和 OpenCode 配置设置相应 profile 与权限。
+这里的 `opencode` 指定智能体程序，`run` 是 OpenCode 执行任务的子命令，后面的字符串是实际传给它的任务。`DEEPXDR_AGENT_ORIGINAL_REQUEST` 在本例中用于向 OpenCode 命令传入任务；新版包装入口的 OpenCode 分析依据来自正式会话，不会使用该变量覆盖实际交互。命令用法见 [OpenCode CLI 文档](https://opencode.ai/docs/cli/#run)。nono 还需授权 OpenCode 访问其配置、运行目录及模型服务；需根据本机安装的 nono 版本和 OpenCode 配置设置相应 profile 与权限。
 
-省略 run ID 时入口会自动生成标识。通过 `scripts/nono run --rollback` 运行且成功退出的命令才会进入该入口的证据发布流程。
+省略 run ID 时入口会自动生成标识。通过 `scripts/nono run --rollback` 运行的命令进入证据发布流程；非零退出也会尝试采集已产生的变更，若未生成可读取快照则报告发布失败。
 
 ## 专用工作区中的冒烟测试
 
@@ -59,12 +61,12 @@ cd "$REPO_ROOT"
 
 | 用例 | 文件修改方式 | 验证重点 |
 | --- | --- | --- |
-| `small` | 复制预设 README 文件 | 文件级分析策略 `file_level` |
-| `medium` | 复制预设代码与配置文件 | 摘要策略 `hunk_summary` |
-| `large` | 复制预设的大型文件 | 风险优先策略 `risk_only` |
+| `small` | 复制预设 README 文件 | 小规模文本变更链路 |
+| `medium` | 复制预设代码与配置文件 | 多文件代码与配置变更链路 |
+| `large` | 复制预设的大型文件 | 较大数据文件变更链路 |
 | `agent` | OpenCode 接收任务并修改 README | 真实智能体接入流程 |
 
-前三个用例通过 `cp` 模拟变更，不启动真实智能体，但仍会调用后端模型分析变更。策略覆盖依赖当前 Compose 中的上下文阈值配置。
+前三个用例通过 `cp` 模拟变更，不启动真实智能体，但仍会调用后端模型分析变更。当前默认阈值下三者均可能采用 `file_level`；名称不等于策略。若专门验证策略切换，可在独立测试部署中临时将后端四项 token 配置设为 200 / 800 / 300 / 80，重建后端并检查记录的 `context_plan.strategy`，测试后移除覆盖恢复默认值。仅在宿主机 export、却未将变量传入 Compose 服务，不会改变容器内阈值。
 
 ### 执行模拟变更用例
 
@@ -83,28 +85,25 @@ unset DEEPXDR_AGENT_RUN_ID DEEPXDR_AGENT_ORIGINAL_REQUEST
 
 ### 执行真实智能体用例
 
-`agent` 用例需要安装 OpenCode，并准备与所安装 nono 版本兼容的 OpenCode profile。当前脚本的配置如下：
+`agent` 用例通过 `/usr/bin/env XDG_STATE_HOME=... opencode run ...` 直接启动真实 OpenCode，自动请求为 README 添加 `Agent Result` 小节。它是单轮自动任务；自由多轮交互见 [OpenCode 多轮意图验收](OPENCODE_INTENT_SMOKE.md)。脚本不再使用 shell 字符串包装 OpenCode，也不再传入旧的 `--auto` 参数。
 
-| 配置项 | 当前脚本使用的值 |
+| 配置变量 | 默认值 |
 | --- | --- |
-| 智能体程序 | `opencode` |
-| 模型 | `deepxdr/deepseek-v3-2-251201` |
-| 模型接口 | `https://ark.cn-beijing.volces.com/api/v3` |
-| 模型凭据 | 从 `OPENAI_API_KEY` 读取 |
-| nono profile | `always-further/opencode` |
-| 网络授权 | `https://ark.cn-beijing.volces.com/**` |
+| `AGENTGUARD_SMOKE_MODEL` | `agent-test/deepseek-v4-flash`，格式为 provider/model |
+| `AGENTGUARD_SMOKE_BASE_URL` | `https://ark.cn-beijing.volces.com/api/coding/v3` |
+| `AGENTGUARD_SMOKE_PROFILE` | `nolabs-ai/opencode` |
+| `AGENTGUARD_SMOKE_ALLOW_DOMAIN` | `https://ark.cn-beijing.volces.com/**` |
+| `OPENAI_API_KEY` | 必须设置，用于生成配置中的环境变量引用，不写入配置文件 |
 
-这些设置来自 [启动脚本](../scripts/agentguard-smoke-nono.sh) 和 [用例生成代码](../scripts/agentguard_smoke_cases.py)，其中模型、接口与 profile 是固定值。运行前应确认其适用于本地环境；若使用其他模型或接口，需同步调整启动命令与生成的 OpenCode 配置，以及对应的网络授权。仅修改 `OPENAI_MODEL` 和 `OPENAI_BASE_URL` 不会改变该用例的 OpenCode 配置。
-
-完成准备后，从仓库根目录执行：
+脚本会生成专用工作区的 `opencode.json`，保留当前 HOME 和模型访问环境，只将 XDG_STATE_HOME 放入 `.opencode-runtime/state`。更换接口时必须同步设置网络授权。后端 OPENAI_MODEL 不会改变此测试的 OpenCode 模型。
 
 ```bash
-export AGENTGUARD_SMOKE_WORKSPACE="$AGENTGUARD_WORKSPACE_ROOT/smoke-workspace"
+export AGENTGUARD_SMOKE_WORKSPACE="$AGENTGUARD_WORKSPACE_ROOT/smoke-agent"
 unset DEEPXDR_AGENT_RUN_ID DEEPXDR_AGENT_ORIGINAL_REQUEST
 ./scripts/agentguard-smoke-nono.sh agent
 ```
 
-该用例要求 OpenCode 为测试 README 添加 `Agent Result` 小节，并将运行数据放入测试工作区中的 `.opencode-runtime` 目录。
+**脚本会删除并重建指定测试目录，仅使用专用可丢弃目录。** 每次 agent 运行主动清除遗留的原始任务变量，以正式会话导出为分析依据。检查新记录的 `conversation.source=opencode_export`、`status=complete`、用户请求包含本次任务，且 README diff 出现 `Agent Result`。仅命令退出成功不足以证明完整链路通过。若采集失败，应显示意图证据不足，而不能回退为预置任务并判定一致。
 
 ## 验证分析结果与人工处置
 
@@ -123,3 +122,5 @@ HTTP 404 时，先根据日志区分是后端分析模型请求失败，还是 O
 ```bash
 ./scripts/agentguard-compose down
 ```
+
+已验证场景见 [验证记录](OPENCODE_VALIDATION.md)。同一冒烟目录每轮重建；若验证回退，应在下一轮开始前完成，或为每轮指定独立目录。

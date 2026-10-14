@@ -11,6 +11,12 @@ class ChangedFile:
     added_lines: int
     deleted_lines: int
     diff: str
+    content_status: str = "text"
+    review_scope: str = "task_change"
+    size_bytes: int | None = None
+    sha256: str = ""
+    verification_reason: str = ""
+    source_binary_sha256: str = ""
 
 
 def parse_unified_diff(diff_text: str) -> list[ChangedFile]:
@@ -23,16 +29,60 @@ def parse_unified_diff(diff_text: str) -> list[ChangedFile]:
         nonlocal current_path, current_lines
         if current_path is None:
             return
-        file_diff = "\n".join(current_lines)
-        added = sum(1 for line in current_lines if line.startswith("+") and not line.startswith("+++"))
-        deleted = sum(1 for line in current_lines if line.startswith("-") and not line.startswith("---"))
+        # Some nono versions repeat the file preview after valid hunks.
+        # Remove only an exact echo of completed hunk bodies, retaining
+        # unexpected trailing changes and the full raw evidence in diff storage.
+        # Legacy headerless hunks remain supported.
+        lines = []
+        remaining_old = remaining_new = 0
+        bounded_hunk = False
+        hunk_body: list[str] = []
+        for index, line in enumerate(current_lines):
+            match = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
+            if match:
+                bounded_hunk = True
+                remaining_old = int(match[2]) if match[2] is not None else 1
+                remaining_new = int(match[4]) if match[4] is not None else 1
+            elif bounded_hunk and not (remaining_old or remaining_new):
+                # Empty separators are not hunk context: a context blank line
+                # is a literal space and must participate in exact comparison.
+                tail = list(current_lines[index:])
+                while tail and tail[0] == "":
+                    tail.pop(0)
+                while tail and tail[-1] == "":
+                    tail.pop()
+                if hunk_body and tail == hunk_body:
+                    break
+            elif bounded_hunk:
+                if line.startswith(("+", "-", " ")) or line == "\\ No newline at end of file":
+                    hunk_body.append(line)
+                if line.startswith("+"):
+                    remaining_new -= 1
+                elif line.startswith("-"):
+                    remaining_old -= 1
+                elif line.startswith(" "):
+                    remaining_old -= 1
+                    remaining_new -= 1
+            lines.append(line)
+        file_diff = "\n".join(lines)
+        added = sum(1 for line in lines if line.startswith("+") and not line.startswith("+++"))
+        deleted = sum(1 for line in lines if line.startswith("-") and not line.startswith("---"))
+        change_type = "modified"
+        if any(line == "--- /dev/null" for line in lines) or any(line.startswith("new file mode ") for line in lines):
+            change_type = "added"
+        elif any(line == "+++ /dev/null" for line in lines) or any(line.startswith("deleted file mode ") for line in lines):
+            change_type = "deleted"
+        content_status = "text" if any(line.startswith("@@") for line in lines) or added or deleted else "not_shown"
+        if any(line.startswith(("Binary files ", "GIT binary patch")) for line in lines):
+            content_status = "binary"
         files.append(
             ChangedFile(
                 path=current_path,
-                change_type="modified",
+                change_type=change_type,
                 added_lines=added,
                 deleted_lines=deleted,
                 diff=file_diff,
+                content_status=content_status,
             )
         )
         current_path = None

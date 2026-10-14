@@ -6,11 +6,13 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Sequence
 
 try:
+    from agent_guard.opencode_session import prepare_capture, RUNTIME_DIR, normalize_exports
     from agent_guard.nono_wrapper import (
         _combined_output,
         _parse_json,
@@ -18,6 +20,7 @@ try:
         create_diff_evidence_writer_from_env,
     )
 except ModuleNotFoundError:
+    from ai_agent.agent_guard.opencode_session import prepare_capture, RUNTIME_DIR, normalize_exports
     from ai_agent.agent_guard.nono_wrapper import (
         _combined_output,
         _parse_json,
@@ -36,25 +39,53 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     command_env = os.environ.copy()
     command_env["XDG_STATE_HOME"] = state_home
-    result = _run_command([real_nono, *args], env=command_env)
-    _forward_output(result)
-
-    if result["exit_code"] == 0 and _is_guarded_run(args):
+    capture = None
+    conversation = None
+    launch_args = list(args)
+    started_at = time.time_ns() // 1_000_000
+    if _is_guarded_run(args):
         try:
-            event = _build_agent_session_event(
-                args=args,
-                run_id=run_id,
-                state_home=state_home,
-                real_nono=real_nono,
-                command_env=command_env,
-                run_result=result,
-            )
-            _publish_event(event)
-        except Exception as exc:
-            print(f"deepxdr nono shim: failed to publish agent session event: {exc}", file=sys.stderr)
+            capture = prepare_capture(_extract_agent_command(args), env=command_env,
+                workspace=_extract_workspace(args), run_id=run_id)
+        except RuntimeError as exc:
+            print(f"deepxdr nono shim: {exc}", file=sys.stderr)
             return 2
-
-    return int(result["exit_code"])
+        except Exception as exc:
+            conversation = normalize_exports(run_id=run_id, workspace=_extract_workspace(args),
+                started_at=started_at, ended_at=started_at, observed=[], exports={},
+                errors=[f"OpenCode 采集初始化失败：{type(exc).__name__}"])
+        if capture:
+            separator = args.index("--")
+            launch_args = [*args[:separator], "--rollback-exclude", RUNTIME_DIR, "--", *capture.command]
+    try:
+        result = _run_command([real_nono, *launch_args], env=command_env,
+                              interactive=os.getenv("DEEPXDR_NONO_INTERACTIVE") == "1")
+        _forward_output(result)
+        if capture:
+            try:
+                conversation = capture.finish()
+            except Exception as exc:
+                conversation = normalize_exports(run_id=run_id, workspace=capture.workspace,
+                    started_at=capture.started_at, ended_at=time.time_ns() // 1_000_000,
+                    observed=[], exports={}, errors=[f"会话采集失败：{type(exc).__name__}"])
+        elif conversation:
+            conversation["ended_at"] = time.time_ns() // 1_000_000
+        # A nonzero agent exit can still leave changes; try to publish its evidence.
+        if _is_guarded_run(args):
+            try:
+                event = _build_agent_session_event(
+                    args=args, run_id=run_id, state_home=state_home, real_nono=real_nono,
+                    command_env=command_env, run_result=result, conversation=conversation,
+                    runtime_baseline=capture.runtime_baseline if capture else None,
+                )
+                _publish_event(event)
+            except Exception as exc:
+                print(f"deepxdr nono shim: failed to publish agent session event: {exc}", file=sys.stderr)
+                return int(result["exit_code"]) or 2
+        return int(result["exit_code"])
+    finally:
+        if capture:
+            capture.close()
 
 
 def _resolve_real_nono() -> str:
@@ -69,12 +100,12 @@ def _resolve_real_nono() -> str:
     raise RuntimeError("DEEPXDR_REAL_NONO must point to the real nono binary, or nono.real must be on PATH")
 
 
-def _run_command(command: list[str], *, env: dict[str, str]) -> dict:
-    process = subprocess.run(command, env=env, text=True, capture_output=True, check=False)
+def _run_command(command: list[str], *, env: dict[str, str], interactive: bool = False) -> dict:
+    process = subprocess.run(command, env=env, text=True, capture_output=not interactive, check=False)
     return {
         "exit_code": process.returncode,
-        "stdout": process.stdout,
-        "stderr": process.stderr,
+        "stdout": process.stdout or "",
+        "stderr": process.stderr or "",
     }
 
 
@@ -97,6 +128,8 @@ def _build_agent_session_event(
     real_nono: str,
     command_env: dict[str, str],
     run_result: dict,
+    conversation: dict | None = None,
+    runtime_baseline=None,
 ) -> dict:
     workspace = _extract_workspace(args)
     agent_command = _extract_agent_command(args)
@@ -124,11 +157,26 @@ def _build_agent_session_event(
         diff_text=_combined_output(diff_result),
     )
 
+    artifact_evidence = None
+    if runtime_baseline is not None:
+        try:
+            artifact_evidence = runtime_baseline.verify(diff_text=_combined_output(diff_result),
+                metadata=_parse_json(metadata.get("stdout", "")), run_id=run_id)
+        except Exception as exc:
+            # Classification failure must never suppress the diff or publication.
+            artifact_evidence = {"version": 1, "run_id": run_id, "files": [],
+                                 "errors": [f"运行依赖核验失败：{type(exc).__name__}"]}
+
     original_request = os.getenv("DEEPXDR_AGENT_ORIGINAL_REQUEST") or " ".join(agent_command) or "nono run"
+    if conversation is not None:
+        original_request = "\n".join(m["text"] for m in conversation["messages"]
+            if m["role"] == "user" and m["scope"] == "current")[:4000]
     return {
+        **({"conversation": conversation} if conversation is not None else {}),
+        **({"runtime_artifacts": artifact_evidence} if artifact_evidence is not None else {}),
         "type": "agent_session",
         "event_type": "finished",
-        "schema_version": "1.0",
+        "schema_version": "1.1" if conversation is not None else "1.0",
         "source": "nono-path-shim",
         "run_id": run_id,
         "original_request": original_request,

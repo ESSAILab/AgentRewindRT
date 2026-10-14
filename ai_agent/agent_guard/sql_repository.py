@@ -408,7 +408,7 @@ def _adjudication_to_dict(adjudication: AgentAdjudication | None) -> dict[str, A
         "recommended_action": adjudication.recommended_action,
         "rollback_recommended": bool(adjudication.rollback_recommended),
     }
-    for key in ("intent_alignment", "intent_alignment_reason"):
+    for key in ("intent_alignment", "intent_alignment_reason", "intent_summary", "intent_evidence_ids"):
         if key in raw_result:
             result[key] = raw_result[key]
     return result

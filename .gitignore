@@ -114,3 +114,6 @@ security-analysis-system/**/*.pyc
 # Local working directories
 .tmp/
 .worktrees/
+
+# Per-run OpenCode conversation evidence (may contain private user input)
+.agentrewind-opencode/

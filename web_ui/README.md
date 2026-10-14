@@ -33,3 +33,7 @@ python run_dashboard.py
 - `POST /api/agent-sessions/{run_id}/accept`
 - `POST /api/agent-sessions/{run_id}/rollback`
 - `DELETE /api/agent-sessions/{run_id}`
+
+## 会话证据展示
+
+详情展示 OpenCode 原始交互、采集状态及“用户请求摘要”；摘要由模型整理，应结合用户原文审阅。已核验运行依赖仍保留路径、大小和 SHA256；二进制未展示文本不代表空文件。diff 预览可能截断，页面在后端分析完成后显示记录，历史记录不会自动补齐对话或重新计算统计。详见 [审阅说明](../README.md#如何解读分析结果)。

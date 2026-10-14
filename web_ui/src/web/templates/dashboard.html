@@ -159,20 +159,53 @@
                                         <div class="border border-gray-200 rounded p-3 bg-white min-w-0">
                                             <div class="agent-file-heading">
                                                 <span class="font-mono text-xs text-gray-800 break-all" x-text="file.path"></span>
-                                                <span class="text-xs text-gray-500 whitespace-nowrap" x-text="`${getAgentChangeTypeLabel(file.change_type)} · +${file.added_lines || 0} / -${file.deleted_lines || 0}`"></span>
+                                                <span class="text-xs text-gray-500 whitespace-nowrap" x-text="getFileChangeDescription(file)"></span>
                                             </div>
+                                            <div x-show="getFileEvidenceLabel(file)" class="agent-wrap mt-2 text-xs bg-gray-50 border border-gray-200 rounded p-2" x-text="getFileEvidenceLabel(file)"></div>
+                                            <details x-show="file.review_scope === 'runtime_dependency' || file.sha256" class="mt-2 text-xs text-gray-600">
+                                                <summary class="cursor-pointer">文件核验证据</summary>
+                                                <div class="agent-wrap mt-2" x-text="file.verification_reason"></div>
+                                                <div class="agent-wrap mt-2">文件 SHA256：<span x-text="file.sha256"></span></div>
+                                                <div x-show="file.source_binary_sha256" class="agent-wrap mt-2">OpenCode 程序 SHA256：<span x-text="file.source_binary_sha256"></span></div>
+                                            </details>
                                             <pre class="agent-diff mt-2 bg-gray-900 text-gray-100 rounded p-3 text-xs" x-text="file.diff || file.summary || '无文本 diff 预览'"></pre>
                                             <div x-show="file.diff_truncated" class="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">diff 预览已截断，原始长度 <span x-text="file.diff_original_chars || 0"></span> 字符</div>
                                         </div>
                                     </template>
                                 </div>
                             </section>
-                            <section>
-                                <h3 class="font-semibold text-gray-900 mb-2">原始请求</h3>
-                                <div class="agent-wrap bg-gray-50 border border-gray-200 rounded p-3 text-gray-700 whitespace-pre-wrap" x-text="session.original_request || '未记录原始请求'"></div>
+                            <section x-show="getAgentAdjudication(session).intent_summary">
+                                <h3 class="font-semibold text-gray-900 mb-2">用户请求摘要</h3>
+                                <div class="agent-wrap bg-gray-50 border border-gray-200 rounded p-3 text-gray-700 whitespace-pre-wrap" x-text="getAgentAdjudication(session).intent_summary"></div>
+                                <div class="agent-wrap mt-2 text-xs text-gray-500" x-text="(getAgentAdjudication(session).intent_evidence_ids || []).join(' · ')"></div>
                             </section>
                         </div>
                         <aside class="space-y-4 min-w-0" aria-label="运行证据">
+                            <section>
+                                <h3 class="font-semibold text-gray-900 mb-2">原始交互与任务来源</h3>
+                                <div class="text-xs text-gray-600 mb-2" x-text="getIntentConversation(session) ? 'OpenCode 正式会话 · ' + getIntentStatus(session) : getIntentStatus(session)"></div>
+                                <div x-show="!getIntentConversation(session)" class="agent-wrap bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-wrap" x-text="session.original_request || '未记录原始请求'"></div>
+                                <template x-if="getIntentConversation(session)">
+                                    <div class="space-y-2">
+                                        <div class="agent-wrap text-xs text-gray-600" x-text="(getIntentConversation(session).sessions || []).map(item => item.id + (item.title ? ' · ' + item.title : '')).join('；')"></div>
+                                        <div class="agent-wrap text-xs text-amber-700 whitespace-pre-wrap" x-text="(getIntentConversation(session).errors || []).join('；')"></div>
+                                        <div x-show="getIntentMessages(session).length === 0" class="text-sm text-gray-500">未采集到可用的用户请求，意图一致性无法判断。</div>
+                                        <template x-for="message in getIntentMessages(session)" :key="message.session_id + '/' + message.id">
+                                            <details class="border border-gray-200 rounded p-3 bg-gray-50" :open="message.scope === 'current'">
+                                                <summary class="cursor-pointer text-xs text-gray-600" x-text="(message.scope === 'current' ? '本次用户请求' : '历史上下文') + ' · ' + formatDate(message.created_at) + ' · ' + message.id"></summary>
+                                                <div class="agent-wrap mt-2 whitespace-pre-wrap text-gray-800" x-text="message.text"></div>
+                                                <div class="agent-wrap mt-2 text-xs text-gray-500" x-show="message.attachments?.length" x-text="'附件内容未解析：' + (message.attachments || []).map(item => item.filename || item.type).join('、')"></div>
+                                            </details>
+                                        </template>
+                                        <details x-show="getIntentMessages(session, 'assistant').length" class="border border-gray-200 rounded p-3">
+                                            <summary class="cursor-pointer text-xs text-gray-600">助手上下文（不代表用户授权）</summary>
+                                            <template x-for="message in getIntentMessages(session, 'assistant')" :key="message.session_id + '/' + message.id">
+                                                <div class="agent-wrap mt-2 whitespace-pre-wrap text-xs text-gray-600" x-text="message.text"></div>
+                                            </template>
+                                        </details>
+                                    </div>
+                                </template>
+                            </section>
                             <section>
                                 <h3 class="font-semibold text-gray-900 mb-2">运行证据</h3>
                                 <dl class="agent-evidence text-xs">
@@ -336,6 +369,19 @@ function agentGuardDashboard() {
             if (session.rollback_status === 'completed') return 'bg-gray-100 text-gray-700';
             return 'bg-yellow-100 text-yellow-800';
         },
+        getIntentConversation(session) {
+            const value = session.conversation;
+            return value && !Array.isArray(value) && value.source === 'opencode_export' ? value : null;
+        },
+        getIntentMessages(session, role = 'user') {
+            const messages = this.getIntentConversation(session)?.messages;
+            return Array.isArray(messages) ? messages.filter(message => message.role === role) : [];
+        },
+        getIntentStatus(session) {
+            const evidence = this.getIntentConversation(session);
+            if (!evidence) return '旧记录未采集';
+            return ({complete: '采集完整', partial: '采集不完整', missing: '未采集到意图', ambiguous: '关联不明确'})[evidence.status] || '采集状态未知';
+        },
         getAgentRiskLabel(level) { return ({critical: '严重风险', high: '高风险', medium: '中风险', low: '低风险'})[level] || '风险待定'; },
         getAgentRiskClass(level) { return ({critical: 'bg-red-200 text-red-900', high: 'bg-orange-100 text-orange-800', medium: 'bg-yellow-100 text-yellow-800', low: 'bg-green-100 text-green-800'})[level] || 'bg-gray-100 text-gray-700'; },
         getAgentVerdictLabel(verdict) {
@@ -349,6 +395,18 @@ function agentGuardDashboard() {
         },
         getAgentRecommendedActionLabel(action) {
             return ({accept: '建议接受', ask_user: '建议人工确认', rollback: '建议回退'})[action] || action || '建议待定';
+        },
+        getFileEvidenceLabel(file) {
+            if (file.review_scope === 'runtime_dependency') return '已核验运行依赖：与本次 OpenCode 内嵌内容一致，保留证据，不单独作为任务越界依据。';
+            if (file.content_status === 'binary' || file.content_status === 'not_shown') return '未展示文件内容，不能视为空文件或无变化；仍需风险审查。';
+            return '';
+        },
+        getFileChangeDescription(file) {
+            const type = this.getAgentChangeTypeLabel(file.change_type);
+            if (file.content_status === 'binary' || file.content_status === 'not_shown') {
+                return type + ' · ' + (Number.isFinite(file.size_bytes) ? file.size_bytes + ' 字节' : '内容未展示');
+            }
+            return `${type} · +${file.added_lines || 0} / -${file.deleted_lines || 0}`;
         },
         getAgentChangeTypeLabel(changeType) {
             return ({added: '新增', created: '新增', modified: '修改', changed: '修改', deleted: '删除', removed: '删除', renamed: '重命名'})[changeType] || changeType || '变更';

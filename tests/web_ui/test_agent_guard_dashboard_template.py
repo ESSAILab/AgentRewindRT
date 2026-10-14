@@ -331,3 +331,44 @@ assert.equal(dashboard.getAgentChangeTypeLabel('future_type'), 'future_type');
 """], capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_opencode_conversation_view_distinguishes_current_and_history():
+    html = TEMPLATE.read_text(encoding='utf-8')
+    code = html.split('<script>', 1)[1].split('</script>', 1)[0]
+    script = "global.window = {};\n" + code + '''
+const app = agentGuardDashboard();
+const session = {conversation: {source:'opencode_export',status:'partial',errors:['导出不全'],messages:[
+ {id:'old',session_id:'s',role:'user',scope:'history',text:'旧任务'},
+ {id:'new',session_id:'s',role:'user',scope:'current',text:'<script>evil</script>'},
+ {id:'a',session_id:'s',role:'assistant',scope:'current',text:'助手'}]}};
+if (app.getIntentMessages(session).length !== 2) throw Error('user messages');
+if (app.getIntentMessages(session, 'assistant').length !== 1) throw Error('assistant context');
+if (app.getIntentStatus(session) !== '采集不完整') throw Error('status');
+if (app.getIntentStatus({}) !== '旧记录未采集') throw Error('legacy');
+if (app.getIntentMessages({conversation:[]}).length !== 0) throw Error('legacy array');
+'''
+    result = subprocess.run(['node', '-e', script], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert 'x-text="message.text"' in html
+    assert 'x-html="message.text"' not in html
+    assert '本次用户请求' in html and '历史上下文' in html
+
+
+def test_runtime_dependency_view_keeps_unknown_files_in_review():
+    html = TEMPLATE.read_text(encoding='utf-8')
+    code = html.split('<script>', 1)[1].split('</script>', 1)[0]
+    script = 'global.window = {};\n' + code + '''
+const app=agentGuardDashboard();
+const known={review_scope:'runtime_dependency',content_status:'binary',size_bytes:13745312};
+const unknown={content_status:'not_shown',added_lines:0,deleted_lines:0};
+if (!app.getFileEvidenceLabel(known).includes('已核验运行依赖')) throw Error('known');
+if (!app.getFileChangeDescription(known).includes('13745312')) throw Error('actual size');
+if (!app.getFileEvidenceLabel(unknown).includes('不能视为空文件')) throw Error('unknown');
+if (app.getFileChangeDescription(unknown).includes('+0')) throw Error('misleading empty count');
+if (!app.getFileChangeDescription({change_type:'modified',added_lines:1,deleted_lines:0}).includes('+1')) throw Error('legacy');
+'''
+    result = subprocess.run(['node', '-e', script], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert 'x-text="file.verification_reason"' in html
+    assert 'x-text="file.sha256"' in html

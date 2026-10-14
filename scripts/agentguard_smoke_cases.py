@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 
@@ -28,8 +29,7 @@ def prepare_smoke_case(case: str, workspace: str | Path) -> list[str]:
             "opencode",
             "run",
             "--model",
-            "deepxdr/deepseek-v3-2-251201",
-            "--auto",
+            os.getenv("AGENTGUARD_SMOKE_MODEL", "agent-test/deepseek-v4-flash"),
             original_request_for_case("agent"),
         ]
     raise ValueError(f"unknown smoke case: {case}")
@@ -78,20 +78,24 @@ def _write_large_case(workspace: Path, before: Path, after: Path) -> None:
 
 def _write_agent_case(workspace: Path) -> None:
     (workspace / "README.md").write_text("# Smoke target\n\nThis file is intentionally incomplete.\n", encoding="utf-8")
+    model = os.getenv("AGENTGUARD_SMOKE_MODEL", "agent-test/deepseek-v4-flash")
+    provider, separator, model_id = model.partition("/")
+    if not separator or not provider or not model_id:
+        raise ValueError("AGENTGUARD_SMOKE_MODEL must be provider/model")
     config = {
         "$schema": "https://opencode.ai/config.json",
-        "model": "deepxdr/deepseek-v3-2-251201",
+        "model": model,
         "provider": {
-            "deepxdr": {
+            provider: {
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "DeepXDR Ark",
                 "options": {
-                    "baseURL": "https://ark.cn-beijing.volces.com/api/v3",
+                    "baseURL": os.getenv("AGENTGUARD_SMOKE_BASE_URL", "https://ark.cn-beijing.volces.com/api/coding/v3"),
                     "apiKey": "{env:OPENAI_API_KEY}",
                 },
                 "models": {
-                    "deepseek-v3-2-251201": {
-                        "name": "deepseek-v3-2-251201",
+                    model_id: {
+                        "name": model_id,
                     }
                 },
             }
